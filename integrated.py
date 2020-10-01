@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-# This variable defines all the external programs that this module
-# relies on.  lxbuildenv reads this variable in order to ensure
-# the build will finish without exiting due to missing third-party
-# programs.
-LX_DEPENDENCIES = ["icestorm", "yosys", "nextpnr-ice40"]
-#LX_CONFIG = "skip-git" # This can be useful for workshops
-
-# Import lxbuildenv to integrate the deps/ directory
-import os,os.path,shutil,sys,subprocess
-sys.path.insert(0, os.path.dirname(__file__))
-#import lxbuildenv
 
 # Disable pylint's E1101, which breaks completely on migen
 #pylint:disable=E1101
@@ -17,11 +6,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
+from litex.build.generic_platform import Pins, IOStandard
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.builder import Builder
 from litex.soc.interconnect.csr import AutoCSR, CSRStatus, CSRStorage
 
-#from litex_boards.targets.fomu import BaseSoC, add_dfu_suffix
 from tinyfpga_bx_soc_target import BaseSoC, add_dfu_suffix
 
 from valentyusb.usbcore import io as usbio
@@ -29,6 +18,7 @@ from valentyusb.usbcore.cpu import dummyusb
 
 import argparse
 
+import ppm
 
 class Blink(Module):
     def __init__(self, pads):
@@ -66,7 +56,6 @@ def main():
     soc = BaseSoC(pnr_seed=args.seed, pnr_placer=args.placer, usb_bridge=True)
 
 
-
     user_led = soc.platform.request("user_led", 0)
     soc.submodules.blink = Blink(user_led)
     soc.submodules.triv_reg = TrivialRegister()
@@ -78,7 +67,8 @@ def main():
                     compile_software=False)
     vns = builder.build()
     soc.do_exit(vns)
-    add_dfu_suffix(os.path.join('build', 'gateware', 'tinyfpga_bx.bin'))
+    # tinyfpga_bx uses tinyprog for now, this should move over to dfu
+    #add_dfu_suffix(os.path.join('build', 'gateware', 'tinyfpga_bx.bin'))
 
 
 if __name__ == "__main__":
