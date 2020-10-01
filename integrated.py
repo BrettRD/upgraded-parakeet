@@ -45,28 +45,11 @@ class PPMinputRegister(Module, AutoCSR):
     def __init__(self, ppm_pad, servo_pads=None, channels=8, timeout=5e6, default_clk_period=1e9/16e6):
         self.input = Signal()
 
-        # this doesn't appear in csr.csv
-        #self.output = [CSRStorage(8, name='channel_'+str(chan)) for chan in range(channels)]
-
-        # this is a mortal sin, but it works
         self.output = []
         for chan in range(channels):
-            exec(
-                'self.channel_' + str(chan) + ' = CSRStatus(8, name=\'channel_' + str(chan) + '\')\n' +
-                'self.output.append(self.channel_' + str(chan) + ')'
-                )
-
-        # this is overly verbose and doesn't obey the channels parameter
-        #self.channel_0 = CSRStatus(8, name='channel_0')
-        #self.channel_1 = CSRStatus(8, name='channel_1')
-        #self.channel_2 = CSRStatus(8, name='channel_2')
-        # ...
-        #self.output = [
-        #    self.channel_0,
-        #    self.channel_1,
-        #    self.channel_2,
-        #    ...
-        #    ]
+            tmp = CSRStatus(8, name='channel_'+str(chan))
+            self.output.append(tmp)
+            setattr(self, f"tmp{chan}", tmp)
 
         ppm_dev = ppm.PPMinput(channels=channels, timeout=timeout, default_clk_period=default_clk_period)
         # assign an input pin to the PPM device
