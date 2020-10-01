@@ -165,7 +165,7 @@ class BaseSoC(SoCCore):
         "csr":      0xe0000000,  # (default shadow @0x60000000)
     }
 
-    def __init__(self, board,
+    def __init__(self,
         pnr_placer="heap", pnr_seed=0, usb_core="dummyusb", usb_bridge=False,
         use_dsp=True, **kwargs):
         """Create a basic SoC for the TinyFPGA_BX.
@@ -182,7 +182,7 @@ class BaseSoC(SoCCore):
             usb_core (str): The name of the USB core to use, if any: dummyusb, epfifo, eptri
             usb_bridge (bool): Whether to include a USB-to-Wishbone bridge
         Raises:
-            ValueError: If either the `usb_core` or `board` are unrecognized
+            ValueError: If the `usb_core` is unrecognized
         Returns:
             Newly-constructed SoC
         """
@@ -272,19 +272,18 @@ def add_dfu_suffix(fn):
     fn_base, _ext = os.path.splitext(fn)
     fn_dfu = fn_base + '.dfu'
     shutil.copyfile(fn, fn_dfu)
-    subprocess.check_call(['dfu-suffix', '--pid', '1209', '--vid', '5bf0', '--add', fn_dfu])
+    subprocess.check_call(['dfu-suffix', '--pid', '6130', '--vid', '1d50', '--add', fn_dfu])
 
 def main():
-    parser = argparse.ArgumentParser(description="LiteX SoC on Fomu")
+    parser = argparse.ArgumentParser(description="LiteX SoC on TinyFPGA_BX")
     parser.add_argument("--build",  action="store_true", help="Build bitstream")
-    parser.add_argument("--board",  choices=["evt", "pvt", "hacker"], required=True, help="Build for a particular hardware board")
     parser.add_argument("--seed",   default=0, help="Seed to use in Nextpnr")
     parser.add_argument("--placer", default="heap", choices=["sa", "heap"], help="Which placer to use in Nextpnr")
     builder_args(parser)
     soc_core_args(parser)
     args = parser.parse_args()
 
-    soc = BaseSoC(board=args.board, pnr_placer=args.placer, pnr_seed=args.seed, debug=True, **soc_core_argdict(args))
+    soc = BaseSoC(pnr_placer=args.placer, pnr_seed=args.seed, debug=True, **soc_core_argdict(args))
     builder = Builder(soc, **builder_argdict(args))
     builder.build(run=args.build)
 
