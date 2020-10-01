@@ -31,13 +31,13 @@ class Monostable(Module):
         self.toff = Signal(count_width, rst=toff)
 
         self.comb += hot.eq((self.out==1) or (self.timer > 0))
-        If(self.out==True,
-            self.sync += self.timer.eq(self.toff)
-        ).Elif((self.hot == True) and (self.out==False),
-            self.sync += self.timer.eq(self.timer - 1)
-        ).Else(
-            self.sync += self.timer.eq(0)
-        )
+        self.sync +=    If(self.out==True,
+                            self.timer.eq(self.toff)
+                        ).Elif((self.hot == True) and (self.out==False),
+                            self.timer.eq(self.timer - 1)
+                        ).Else(
+                            self.timer.eq(0)
+                        )
 
 
 # half-bridge shoot-through protection
@@ -64,11 +64,11 @@ class Sequencer(Module):
         self.flag = Signal(1)
         self.count_fall = Signal(count_width, rst=count_fall)
         self.count_rise = Signal(count_width, rst=count_rise)
-        If(self.count_rise <= self.count_fall,
-            self.comb += self.flag.eq((self.counter >= self.count_rise) and (self.counter < self.count_fall))
-        ).Else(
-            self.comb += self.flag.eq((self.counter >= self.count_rise) or (self.counter < self.count_fall))
-        )
+        self.comb += If(self.count_rise <= self.count_fall,
+                        self.flag.eq((self.counter >= self.count_rise) and (self.counter < self.count_fall))
+                    ).Else(
+                        self.flag.eq((self.counter >= self.count_rise) or (self.counter < self.count_fall))
+                    )
 
 
 class SimpleCounter(Module):
@@ -78,13 +78,13 @@ class SimpleCounter(Module):
         self.increment = Signal(count_width, signed=True)
         self.counter = Signal(count_width)
 
-        If(self.strobe,
-            If(self.counter >= self.max_count,
-                self.sync += self.counter.eq(0)
-            ).Else(
-                self.sync += self.counter.eq(self.counter + 1)
-            )
-        )
+        self.sync += If(self.strobe,
+                        If(self.counter >= self.max_count,
+                            self.counter.eq(0)
+                        ).Else(
+                            self.counter.eq(self.counter + 1)
+                        )
+                    )
 
 
 class PWM(Module):
@@ -95,11 +95,11 @@ class PWM(Module):
         self.pwm = self.seq.flag
         self.compare = self.seq.count_fall
         self.phase_correct = Signal(1, rst=phase_correct)
-        If(self.phase_correct,
-            self.comb += self.seq.count_rise.eq(self.tim.max_count - self.compare)
-        ).Else(
-            self.comb += self.seq.count_rise.eq(0)  # already implicit in reset value
-        )
+        self.comb += If(self.phase_correct,
+                        self.seq.count_rise.eq(self.tim.max_count - self.compare)
+                    ).Else(
+                        self.seq.count_rise.eq(0)  # already implicit in reset value
+                    )
 
 
 # updown counter used for rotor position tracking
@@ -112,34 +112,35 @@ class UpDownCounter(Module):
 
         self.counter = Signal(count_width)
 
-        If(self.strobe,
-            If(self.dir == 0,
-                If((self.counter + self.increment) > self.max_count,
-                    self.sync += self.counter.eq((self.counter + self.increment) - self.max_count)
-                ).Else(
-                    self.sync += self.counter.eq(self.counter + self.increment)
-                )
-            ).Else(
-                If((self.counter - self.increment) < 0,
-                    self.sync += self.counter.eq((self.counter - self.increment) + self.max_count)
-                ).Else(
-                    self.sync += self.counter.eq(self.counter - self.increment)
-                )
-        )
+        self.sync +=    If(self.strobe,
+                            If(self.dir == 0,
+                                If((self.counter + self.increment) > self.max_count,
+                                    self.counter.eq((self.counter + self.increment) - self.max_count)
+                                ).Else(
+                                    self.counter.eq(self.counter + self.increment)
+                                )
+                            ).Else(
+                                If((self.counter - self.increment) < 0,
+                                    self.counter.eq((self.counter - self.increment) + self.max_count)
+                                ).Else(
+                                    self.counter.eq(self.counter - self.increment)
+                                )
+                            )
+                        )
 
 
 class PhaseSelector(Module):
-    def __init__(self, phase_width=16, phase_max=3*(2**(count_width-2))-1):
+    def __init__(self, phase_width=16, phase_max=3*(2**(phase_width-2))-1):
         pt = phase_table(phase_max)
-        self.phase = Signal(count_width)
+        self.phase = Signal(phase_width)
         # period where phase can be driven to turn clockwise
-        self.uvw_pos  = [Sequencer(count_width=phase_width, count_rise=pt[n]['pos_start'], count_fall=pt[n]['pos_end'] for n in range(3)]
+        self.uvw_pos  = [Sequencer(count_width=phase_width, count_rise=pt[n]['pos_start'], count_fall=pt[n]['pos_end']) for n in range(3)]
         # period where the phase back-emf should show a rising zero crossing
-        self.uvw_fall = [Sequencer(count_width=phase_width, count_rise=pt[n]['fall_start'], count_fall=pt[n]['fall_end'] for n in range(3)]
+        self.uvw_fall = [Sequencer(count_width=phase_width, count_rise=pt[n]['fall_start'], count_fall=pt[n]['fall_end']) for n in range(3)]
         # period where phase can be driven to turn counter-clockwise
-        self.uvw_neg  = [Sequencer(count_width=phase_width, count_rise=pt[n]['neg_start'], count_fall=pt[n]['neg_end'] for n in range(3)]
+        self.uvw_neg  = [Sequencer(count_width=phase_width, count_rise=pt[n]['neg_start'], count_fall=pt[n]['neg_end']) for n in range(3)]
         # period where the phase back-emf should show a falling zero crossing
-        self.uvw_rise = [Sequencer(count_width=phase_width, count_rise=pt[n]['rise_start'], count_fall=pt[n]['rise_end'] for n in range(3)]
+        self.uvw_rise = [Sequencer(count_width=phase_width, count_rise=pt[n]['rise_start'], count_fall=pt[n]['rise_end']) for n in range(3)]
         # common clock
         for n in range(3):
             self.comb += uvw_pos[n].counter.eq(self.phase)
@@ -152,22 +153,22 @@ class Inverter(Module):
     def __init__(self, selector=PhaseSelector(count_width=phase_width, max_count=phase_max), phase_width=16, phase_max=3*(2**(count_width-2))-1, pwm_width=16):
         self.dir = Signal(1)
         self.pwm = PWM(count_width=pwm_width)
-        self.uvw_bridge = [HalfBridge(l_toff=16, h_toff==16) for n in range(3)]
+        self.uvw_bridge = [HalfBridge(l_toff=16, h_toff=16) for n in range(3)]
         self.selector = selector
         self.phase = self.selector.phase
         self.duty = self.pwm.compare
 
         for n in range(3):
-            If(self.dir,
-                self.comb += self.uvw_bridge[n].en.eq((self.selector.uvw_pos[n].flag and self.pwm.pwm) or self.selector.uvw_neg[n].flag)
-                self.comb += self.uvw_bridge[n].dir.eq(self.selector.uvw_pos[n].flag)
-            ).Else
-                self.comb += self.uvw_bridge[n].en.eq((self.selector.uvw_neg[n].flag and self.pwm.pwm) or self.selector.uvw_pos[n].flag)
-                self.comb += self.uvw_bridge[n].dir.eq(self.selector.uvw_neg[n].flag)
-            )
+            self.comb +=    If(self.dir,
+                                self.uvw_bridge[n].en.eq((self.selector.uvw_pos[n].flag and self.pwm.pwm) or self.selector.uvw_neg[n].flag),
+                                self.uvw_bridge[n].dir.eq(self.selector.uvw_pos[n].flag)
+                            ).Else(
+                                self.uvw_bridge[n].en.eq((self.selector.uvw_neg[n].flag and self.pwm.pwm) or self.selector.uvw_pos[n].flag),
+                                self.uvw_bridge[n].dir.eq(self.selector.uvw_neg[n].flag)
+                            )
 
 class ObserverEMF(Module):
-    def __init__(self, selector=PhaseSelector(count_width=phase_width, max_count=phase_max), phase_width = 16, phase_max=3*(2**(phase_width-2))-1)
+    def __init__(self, selector=PhaseSelector(count_width=phase_width, max_count=phase_max), phase_width = 16, phase_max=3*(2**(phase_width-2))-1):
         pt = phase_table(phase_max)
         self.selector = selector
         # three comparators, assigned to pins at top level
@@ -190,26 +191,21 @@ class ObserverEMF(Module):
             self.comb += self.comp_rise[n].eq( (self.comp_edge[n]==1) and (self.comp[n]==1) )
             self.comb += self.comp_fall[n].eq( (self.comp_edge[n]==1) and (self.comp[n]==0) )
 
-            If(self.selector.uvw_rise[n].flag,
-                self.comb += self.phase_observation.eq(pt[n]['rise_edge'])
-                If(self.comp_rise==1,
-                    self.sync += self.dir.eq(0)
-                ).Elif(self.comp_fall==1,
-                    self.sync += self.dir.eq(1)
-                )
-            ).Elif(self.selector.uvw_fall[n].flag,
-                self.comb += self.phase_observation.eq(pt[n]['fall_edge'])
-                If(self.comp_fall==1,
-                    self.sync += self.dir.eq(0)
-                ).Elif(self.comp_rise==1,
-                    self.sync += self.dir.eq(1)
-                )
-            )
+            self.comb +=    If(self.selector.uvw_rise[n].flag,
+                                self.phase_observation.eq(pt[n]['rise_edge'])
+                            ).Elif(self.selector.uvw_fall[n].flag,
+                                self.phase_observation.eq(pt[n]['fall_edge'])
+                            )
+            self.sync +=    If(self.comp_edge[n]==1,
+                                self.dir.eq(self.comp_rise[n] ^ self.selector.uvw_rise[n].flag)
+                            )
+            # XXX assert that rise and fall can't be driven together
+            # XXX assert that self.selector.uvw_rise[n].flag and self.selector.uvw_fall are never on at the same time
             # XXX assert that phase_observation is never undriven or doubly driven,
             #       either would indicate a timing error
 
 class ObserverHall(Module):
-    def __init__(self, phase_width = 16, phase_max=3*(2**(phase_width-2))-1)
+    def __init__(self, phase_width = 16, phase_max=3*(2**(phase_width-2))-1):
         pt = phase_table(phase_max)
         #hall_table={0:8, 1:0,3:1,2:2,6:3,4:4,5:5, 7:8}
         hall_table = Array([0,0,2,1,4,5,3,0])   
@@ -236,28 +232,32 @@ class ObserverHall(Module):
         self.comb += hall_idx.eq(hall_table[self.hall])
         self.comb += hall_idx_prev.eq(hall_table[hall_prev])
 
-        ).If(self.strobe == False,
-            self.comb += self.phase_angle.eq(hall_angle_rough[hall_idx]),
-            self.comb += self.dir.eq(dir_prev),
-            self.comb += self.hall_glitch.eq(hall_error)
+        self.comb +=    If(self.strobe == False,
+                            self.phase_angle.eq(hall_angle_rough[hall_idx]),
+                            self.dir.eq(dir_prev),
+                            self.hall_glitch.eq(hall_error)
+                        ).Elif((hall_idx == (hall_idx_prev+1)) or ((hall_idx==0) and (hall_idx_prev==5)),
+                            self.phase_angle.eq(hall_angle_edge[hall_idx]),
+                            self.dir.eq(0),
+                            self.hall_glitch.eq(hall_error or hall_error_prev),
+                        ).Elif((hall_idx_prev == (hall_idx+1)) or ((hall_idx==5) and (hall_idx_prev==0)),
+                            self.phase_angle.eq(hall_angle_edge[hall_idx_prev]),
+                            self.dir.eq(1),
+                            self.hall_glitch.eq(hall_error or hall_error_prev),
+                        ).Else(
+                            self.phase_angle.eq(hall_angle_rough[hall_idx]),
+                            self.dir.eq(dir_prev),
+                            self.hall_glitch.eq(True)
+                        )
 
-        ).Elif((hall_idx == (hall_idx_prev+1)) or ((hall_idx==0) and (hall_idx_prev==5)),
-            self.comb += self.phase_angle.eq(hall_angle_edge[hall_idx]),
-            self.comb += self.dir.eq(0),
-            self.comb += self.hall_glitch.eq(hall_error or hall_error_prev),
-            self.sync += dir_prev.eq(self.dir)
+        self.sync +=    If(self.strobe == True,
+                            If((hall_idx == (hall_idx_prev+1)) or ((hall_idx==0) and (hall_idx_prev==5)),
+                                dir_prev.eq(self.dir)
+                            ).Elif((hall_idx_prev == (hall_idx+1)) or ((hall_idx==5) and (hall_idx_prev==0)),
+                                dir_prev.eq(self.dir)
+                            )
+                        )
 
-        ).Elif((hall_idx_prev == (hall_idx+1)) or ((hall_idx==5) and (hall_idx_prev==0)),
-            self.comb += self.phase_angle.eq(hall_angle_edge[hall_idx_prev]),
-            self.comb += self.dir.eq(1),
-            self.comb += self.hall_glitch.eq(hall_error or hall_error_prev),
-            self.sync += dir_prev.eq(self.dir)
-
-        ).Else(
-            self.comb += self.phase_angle.eq(hall_angle_rough[hall_idx]),
-            self.comb += self.dir.eq(dir_prev),
-            self.comb += self.hall_glitch.eq(True)
-        )
 
 
 
@@ -269,7 +269,7 @@ class ObserverHall(Module):
 #     16MHz sysclk, 3*2**14 phase_max, updating by one every clock cycle makes 325Hz 
 # drop phase resolution to 3*2**10, run variable prescaler single increment
 class PhaseEstimator(Module):
-    def __init__(self, phase_width=16, phase_max=3*(2**(phase_width-2))-1, timer_width=16, phase_observation, strobe):
+    def __init__(self, phase_width=16, phase_max=3*(2**(phase_width-2))-1, timer_width=16):
         
         phase_obs_dist = (phase_max+1) / 6 # should be a power of two
         # XXX assert that phase_timer_divider is a power of two
@@ -299,29 +299,35 @@ class PhaseEstimator(Module):
         self.comb += self.phase_timer_prescale.eq(self.time_capture / phase_obs_dist) # division by power of two becomes bit shift
 
 
-        If(self.strobe,
-            self.sync += self.timer.eq(0)
-            self.comb += self.phase_timer_strobe.eq(0)
-            If(self.glitch == False,
-                self.sync += self.phase_capture.eq(self.phase_observation)
-                self.sync += self.time_capture.eq(self.timer)
-                self.sync += self.phase_timer.eq(0)
-                self.sync += self.phase_estimate.eq(self.phase_observation)
-            )
-        ).Else(
-            If(timer < timer_max,
-                self.sync += self.timer.eq(self.timer + 1)
-            )
-            If(self.phase_timer >= self.phase_timer_prescale,
-                self.comb += self.phase_timer_strobe.eq(1)
-                self.sync += self.phase_timer.eq(0)
-            ).Else(
-                self.comb += self.phase_timer_strobe.eq(0)
-                self.sync += self.phase_timer.eq(self.phase_timer + 1)
-            )
-        )
+        self.comb +=    If(self.strobe,
+                            self.phase_timer_strobe.eq(0)
+                        ).Else(
+                            If(self.phase_timer >= self.phase_timer_prescale,
+                                self.phase_timer_strobe.eq(1)
+                            ).Else(
+                                self.phase_timer_strobe.eq(0)
+                            )
+                        )
 
 
+        self.sync +=    If(self.strobe,
+                            self.timer.eq(0),
+                            If(self.glitch == False,
+                                self.phase_capture.eq(self.phase_observation),
+                                self.time_capture.eq(self.timer),
+                                self.phase_timer.eq(0),
+                                self.phase_estimate.eq(self.phase_observation)
+                            )
+                        ).Else(
+                            If(timer < timer_max,
+                                self.timer.eq(self.timer + 1)
+                            ),
+                            If(self.phase_timer >= self.phase_timer_prescale,
+                                self.phase_timer.eq(0)
+                            ).Else(
+                                self.phase_timer.eq(self.phase_timer + 1)
+                            )
+                        )
 
 
 
