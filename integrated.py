@@ -32,7 +32,7 @@ import argparse
 
 class Blink(Module):
     def __init__(self, pads):
-        count_max = int(48e6)
+        count_max = int(16e6)
         user_led = pads
         blink = Signal()
         counter = Signal(max=count_max)
@@ -44,6 +44,11 @@ class Blink(Module):
         )
         self.comb += user_led.eq(blink)
         
+
+class TrivialRegister(Module, AutoCSR):
+    def __init__(self):
+        self.output = CSRStorage(8)
+
 
 
 
@@ -63,8 +68,10 @@ def main():
 
 
     user_led = soc.platform.request("user_led", 0)
-    Blink(user_led)
+    soc.submodules.blink = Blink(user_led)
+    soc.submodules.triv_reg = TrivialRegister()
 
+    soc.add_csr("triv_reg")
 
     builder = Builder(soc,
                     output_dir="build", csr_csv="build/csr.csv",
