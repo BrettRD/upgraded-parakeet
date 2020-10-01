@@ -33,11 +33,50 @@ class Blink(Module):
             counter.eq(counter + 1)
         )
         self.comb += user_led.eq(blink)
-        
+
 
 class TrivialRegister(Module, AutoCSR):
     def __init__(self):
-        self.output = CSRStorage(8)
+        self.reg = CSRStorage(8, name="out_triv")
+
+
+# wrap the ppm input device in CSR decoration and pad assignments
+class PPMinputRegister(Module, AutoCSR):
+    def __init__(self, ppm_pad, servo_pads=None, channels=8, timeout=5e6, default_clk_period=1e9/16e6):
+        self.input = Signal()
+
+        # this doesn't appear in csr.csv
+        #self.output = [CSRStorage(8, name='channel_'+str(chan)) for chan in range(channels)]
+
+        # this is a mortal sin, but it works
+        self.output = []
+        for chan in range(channels):
+            exec(
+                'self.channel_' + str(chan) + ' = CSRStatus(8, name=\'channel_' + str(chan) + '\')\n' +
+                'self.output.append(self.channel_' + str(chan) + ')'
+                )
+
+        # this is overly verbose and doesn't obey the channels parameter
+        #self.channel_0 = CSRStatus(8, name='channel_0')
+        #self.channel_1 = CSRStatus(8, name='channel_1')
+        #self.channel_2 = CSRStatus(8, name='channel_2')
+        # ...
+        #self.output = [
+        #    self.channel_0,
+        #    self.channel_1,
+        #    self.channel_2,
+        #    ...
+        #    ]
+
+        ppm_dev = ppm.PPMinput(channels=channels, timeout=timeout, default_clk_period=default_clk_period)
+        # assign an input pin to the PPM device
+        self.comb += ppm_dev.ppm.eq(ppm_pad)
+        for chan in range(channels):
+            self.comb += self.output[chan].status.eq(ppm_dev.widths[chan])
+            if servo_pads != None:
+                self.comb += servo_pads[chan].eq(ppm_dev.pwm[chan])
+
+
 
 
 
@@ -57,10 +96,19 @@ def main():
 
 
     user_led = soc.platform.request("user_led", 0)
+
+    ppm_input_extension = [("ppm_input", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
+    soc.platform.add_extension(ppm_input_extension)
+    ppm_input_pin = soc.platform.request("ppm_input", 0)
+
+
+
     soc.submodules.blink = Blink(user_led)
     soc.submodules.triv_reg = TrivialRegister()
+    soc.submodules.ppm_doodad = PPMinputRegister(ppm_input_pin, channels=8)
 
     soc.add_csr("triv_reg")
+    soc.add_csr("ppm_doodad")
 
     builder = Builder(soc,
                     output_dir="build", csr_csv="build/csr.csv",
