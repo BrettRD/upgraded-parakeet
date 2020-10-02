@@ -60,18 +60,28 @@ def main():
 
 
 
-    ppm_input_extension = [("ppm_input", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
+    ppm_input_extension = [("ppm_input_pin", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
     soc.platform.add_extension(ppm_input_extension)
-    ppm_input_pin = soc.platform.request("ppm_input", 0)
-    soc.submodules.ppm_doodad = liteppm.PPMinputRegister(ppm_input_pin, channels=8)
-    soc.add_csr("ppm_doodad")
+    ppm_input_pin = soc.platform.request("ppm_input_pin", 0)
+    soc.submodules.ppm_input = liteppm.PPMinputRegister(ppm_input_pin, channels=8)
+    soc.add_csr("ppm_input")
 
+
+    ppm_output_extension = [("ppm_output_pin", 0, Pins("GPIO:3"), IOStandard("LVCMOS33"))]
+    soc.platform.add_extension(ppm_output_extension)
+    ppm_output_pin = soc.platform.request("ppm_output_pin", 0)
+    soc.submodules.ppm_output = liteppm.PPMoutputRegister(ppm_output_pin, channels=8)
+    soc.add_csr("ppm_output")
 
 
     user_led = soc.platform.request("user_led", 0)
     soc.submodules.blink = Blink(user_led)
+
+
     soc.submodules.triv_reg = TrivialRegister()
     soc.add_csr("triv_reg")
+
+
 
     builder = Builder(soc,
                     output_dir="build", csr_csv="build/csr.csv",
