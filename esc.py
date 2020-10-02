@@ -60,7 +60,7 @@ class HalfBridge(Module):
 
 # window comparator module
 class Sequencer(Module):
-    def __init__(self, count_rise=0, count_fall=0, count_max=(2**16)-1, count_min=0):
+    def __init__(self, count_rise=0, count_fall=0, count_max=2**16, count_min=0):
         self.counter = Signal(max=count_max, min=count_min)
         self.flag = Signal()
         self.count_fall = Signal(max=count_max, min=count_min, reset=count_fall)
@@ -73,7 +73,7 @@ class Sequencer(Module):
 
 
 class SimpleCounter(Module):
-    def __init__(self, count_max=(2**16)-1, count_min=0):
+    def __init__(self, count_max=2**16, count_min=0):
         self.strobe = Signal(reset=1)
         self.max_count = Signal(max=count_max, min=count_min, reset=count_max)
         self.counter = Signal(max=count_max, min=count_min, reset=count_min)
@@ -88,7 +88,7 @@ class SimpleCounter(Module):
 
 
 class PWM(Module):
-    def __init__(self, count_max=(2**16)-1, compare=0, phase_correct=False):
+    def __init__(self, count_max=2**16, compare=0, phase_correct=False):
         self.tim = SimpleCounter(count_max=count_max)
         self.seq = Sequencer(count_max=count_max, count_fall=compare, count_rise=0)
         self.counter = self.tim.counter
@@ -104,7 +104,7 @@ class PWM(Module):
 
 # updown counter used for rotor position tracking
 class UpDownCounter(Module):
-    def __init__(self, count_max=(2**16)-1, count_min=0):
+    def __init__(self, count_max=2**16, count_min=0):
         self.strobe = Signal(reset=1)
         self.max_count = Signal(max=count_max, min=count_min, reset=count_max)
         self.min_count = Signal(max=count_max, min=count_min, reset=count_min)
@@ -131,8 +131,8 @@ class UpDownCounter(Module):
 
 
 class PhaseSelector(Module):
-    def __init__(self, phase_max=3*(2**(16-2))-1):
-        pt = phase_table(phase_max+1) # XXX find a convention for max vs max+1
+    def __init__(self, phase_max=3*(2**(16-2))):
+        pt = phase_table(phase_max) # XXX find a convention for max vs max+1
         self.phase = Signal(max=phase_max)
         # period where phase can be driven to turn clockwise
         self.uvw_pos  = [Sequencer(count_rise=pt[n]['pos_start'], count_fall=pt[n]['pos_end'], count_max=phase_max) for n in range(3)]
@@ -151,7 +151,7 @@ class PhaseSelector(Module):
 
 
 class Inverter(Module):
-    def __init__(self, selector=PhaseSelector(phase_max=3*(2**(16-2))-1), phase_max=3*(2**(16-2))-1, pwm_count_max=(2**16)-1):
+    def __init__(self, selector=PhaseSelector(phase_max=3*(2**(16-2))), phase_max=3*(2**(16-2)), pwm_count_max=2**16):
 
         self.dir = Signal()
         self.pwm = PWM(count_max=pwm_count_max)
@@ -170,8 +170,8 @@ class Inverter(Module):
                             )
 
 class ObserverEMF(Module):
-    def __init__(self, selector=PhaseSelector(phase_max=3*(2**(16-2))-1), phase_max=3*(2**(16-2))-1):
-        pt = phase_table(phase_max+1)
+    def __init__(self, selector=PhaseSelector(phase_max=3*(2**(16-2))), phase_max=3*(2**(16-2))):
+        pt = phase_table(phase_max)
         self.selector = selector
         # three comparators, assigned to pins at top level
         self.comp = [Signal() for _ in range(3)]
@@ -207,12 +207,12 @@ class ObserverEMF(Module):
             #       either would indicate a timing error
 
 class ObserverHall(Module):
-    def __init__(self, phase_max=3*(2**(16-2))-1):
-        pt = phase_table(phase_max+1)
+    def __init__(self, phase_max=3*(2**(16-2))):
+        pt = phase_table(phase_max)
         #hall_table={0:8, 1:0,3:1,2:2,6:3,4:4,5:5, 7:8}
         hall_table = Array([0,0,2,1,4,5,3,0])
-        hall_angle_rough = Array([((2*n+ 1)%12)*((phase_max+1)/12) for n in range(6)])
-        hall_angle_edge  = Array([((2*n+ 0)%12)*((phase_max+1)/12) for n in range(6)])
+        hall_angle_rough = Array([((2*n+ 1)%12)*((phase_max)/12) for n in range(6)])
+        hall_angle_edge  = Array([((2*n+ 0)%12)*((phase_max)/12) for n in range(6)])
 
         self.phase_angle = Signal(max=phase_max) # current observation
         self.strobe = Signal()        # the observation captures an edge this clock cycle
@@ -271,9 +271,9 @@ class ObserverHall(Module):
 #     16MHz sysclk, 3*2**14 phase_max, updating by one every clock cycle makes 325Hz 
 # drop phase resolution to 3*2**10, run variable prescaler single increment
 class PhaseEstimator(Module):
-    def __init__(self, phase_max=3*(2**(16-2))-1, prescale_count_max=(2**16)-1):
+    def __init__(self, phase_max=3*(2**(16-2)), prescale_count_max=2**16):
         
-        phase_obs_dist = (phase_max+1) / 6 # should be a power of two
+        phase_obs_dist = (phase_max) / 6 # should be a power of two
         # XXX assert that phase_timer_divider is a power of two
 
         self.phase_counter = UpDownCounter(count_max=phase_max)
