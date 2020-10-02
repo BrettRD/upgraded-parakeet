@@ -59,20 +59,19 @@ def main():
     soc = BaseSoC(pnr_seed=args.seed, pnr_placer=args.placer, usb_bridge=True)
 
 
-    user_led = soc.platform.request("user_led", 0)
 
     ppm_input_extension = [("ppm_input", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
     soc.platform.add_extension(ppm_input_extension)
     ppm_input_pin = soc.platform.request("ppm_input", 0)
+    soc.submodules.ppm_doodad = liteppm.PPMinputRegister(ppm_input_pin, channels=8)
+    soc.add_csr("ppm_doodad")
 
 
 
+    user_led = soc.platform.request("user_led", 0)
     soc.submodules.blink = Blink(user_led)
     soc.submodules.triv_reg = TrivialRegister()
-    soc.submodules.ppm_doodad = liteppm.PPMinputRegister(ppm_input_pin, channels=8)
-
     soc.add_csr("triv_reg")
-    soc.add_csr("ppm_doodad")
 
     builder = Builder(soc,
                     output_dir="build", csr_csv="build/csr.csv",
