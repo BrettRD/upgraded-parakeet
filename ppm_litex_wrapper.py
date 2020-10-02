@@ -6,15 +6,16 @@ import ppm
 # wrap the ppm input device in CSR decoration and pad assignments
 class PPMinputRegister(Module, AutoCSR):
     def __init__(self, ppm_pad, servo_pads=None, channels=8, timeout=5e6, default_clk_period=1e9/16e6):
-        self.input = Signal()
 
+        ppm_dev = ppm.PPMinput(channels=channels, timeout=timeout, default_clk_period=default_clk_period)
+
+        self.input = Signal()
         self.output = []
         for chan in range(channels):
-            tmp = CSRStatus(8, name='channel_'+str(chan))
+            tmp = CSRStatus(8, name='channel_'+str(chan))   # XXX need to set bit width properly
             self.output.append(tmp)
             setattr(self, f"tmp{chan}", tmp)
 
-        ppm_dev = ppm.PPMinput(channels=channels, timeout=timeout, default_clk_period=default_clk_period)
         # assign an input pin to the PPM device
         self.comb += ppm_dev.ppm.eq(ppm_pad)
         for chan in range(channels):
