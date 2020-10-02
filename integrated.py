@@ -18,7 +18,8 @@ from valentyusb.usbcore.cpu import dummyusb
 
 import argparse
 
-import ppm
+import ppm_litex_wrapper as liteppm
+import esc
 
 class Blink(Module):
     def __init__(self, pads):
@@ -38,26 +39,6 @@ class Blink(Module):
 class TrivialRegister(Module, AutoCSR):
     def __init__(self):
         self.reg = CSRStorage(8, name="out_triv")
-
-
-# wrap the ppm input device in CSR decoration and pad assignments
-class PPMinputRegister(Module, AutoCSR):
-    def __init__(self, ppm_pad, servo_pads=None, channels=8, timeout=5e6, default_clk_period=1e9/16e6):
-        self.input = Signal()
-
-        self.output = []
-        for chan in range(channels):
-            tmp = CSRStatus(8, name='channel_'+str(chan))
-            self.output.append(tmp)
-            setattr(self, f"tmp{chan}", tmp)
-
-        ppm_dev = ppm.PPMinput(channels=channels, timeout=timeout, default_clk_period=default_clk_period)
-        # assign an input pin to the PPM device
-        self.comb += ppm_dev.ppm.eq(ppm_pad)
-        for chan in range(channels):
-            self.comb += self.output[chan].status.eq(ppm_dev.widths[chan])
-            if servo_pads != None:
-                self.comb += servo_pads[chan].eq(ppm_dev.pwm[chan])
 
 
 
@@ -88,7 +69,7 @@ def main():
 
     soc.submodules.blink = Blink(user_led)
     soc.submodules.triv_reg = TrivialRegister()
-    soc.submodules.ppm_doodad = PPMinputRegister(ppm_input_pin, channels=8)
+    soc.submodules.ppm_doodad = liteppm.PPMinputRegister(ppm_input_pin, channels=8)
 
     soc.add_csr("triv_reg")
     soc.add_csr("ppm_doodad")
