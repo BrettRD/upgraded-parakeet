@@ -22,25 +22,17 @@ import ppm_litex_wrapper as liteppm
 import esc
 
 class Blink(Module):
-    def __init__(self, pads):
-        count_max = int(16e6)
+    def __init__(self, pads, sig):
         user_led = pads
-        blink = Signal()
-        counter = Signal(max=count_max)
-        self.sync += If(counter >= count_max,
-            counter.eq(0),
-            blink.eq(blink + 1)
-        ).Else(
-            counter.eq(counter + 1)
-        )
-        self.comb += user_led.eq(blink)
+        self.comb += user_led.eq(sig)
 
 
 class TrivialRegister(Module, AutoCSR):
     def __init__(self):
-        self.reg = CSRStorage(8, name="out_triv")
-
-
+        self.reg = CSRStatus(8, name="out_triv", reset=37)
+        self.count = Signal(8)
+        self.sync += self.count.eq(self.count+1)
+        self.comb += self.reg.status.eq(self.count)
 
 
 
@@ -60,22 +52,32 @@ def main():
 
 
 
-    ppm_input_extension = [("ppm_input_pin", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
-    soc.platform.add_extension(ppm_input_extension)
-    ppm_input_pin = soc.platform.request("ppm_input_pin", 0)
-    soc.submodules.ppm_input = liteppm.PPMinputRegister(ppm_input_pin, channels=8)
+    channels=2
+    ppm_loop_pin = Signal()
+    pwm_pins = [Signal() for _ in range(channels)]
+    #ppm_input_extension = [("ppm_input_pin", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
+    #soc.platform.add_extension(ppm_input_extension)
+    #ppm_input_pin = soc.platform.request("ppm_input_pin", 0)
+    soc.submodules.ppm_input = liteppm.PPMinputRegister(ppm_loop_pin, servo_pads=pwm_pins, channels=channels)
     soc.add_csr("ppm_input")
 
 
-    ppm_output_extension = [("ppm_output_pin", 0, Pins("GPIO:3"), IOStandard("LVCMOS33"))]
-    soc.platform.add_extension(ppm_output_extension)
-    ppm_output_pin = soc.platform.request("ppm_output_pin", 0)
-    soc.submodules.ppm_output = liteppm.PPMoutputRegister(ppm_output_pin, channels=8)
+    #ppm_output_extension = [("ppm_output_pin", 0, Pins("GPIO:3"), IOStandard("LVCMOS33"))]
+    #soc.platform.add_extension(ppm_output_extension)
+    #ppm_output_pin = soc.platform.request("ppm_output_pin", 0)
+    soc.submodules.ppm_output = liteppm.PPMoutputRegister(ppm_loop_pin, channels=channels)
     soc.add_csr("ppm_output")
 
 
+    #pwm_input_extension = [("pwm_input_pin", 0, Pins("GPIO:4"), IOStandard("LVCMOS33"))]
+    #soc.platform.add_extension(pwm_input_extension)
+    #pwm_input_pin = soc.platform.request("pwm_input_pin", 0)
+    soc.submodules.pwm_input = liteppm.PWMinputRegister(ppm_loop_pin)
+    soc.add_csr("pwm_input")
+
+
     user_led = soc.platform.request("user_led", 0)
-    soc.submodules.blink = Blink(user_led)
+    soc.submodules.blink = Blink(user_led, ppm_loop_pin)
 
 
     soc.submodules.triv_reg = TrivialRegister()

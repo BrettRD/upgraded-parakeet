@@ -23,7 +23,7 @@ class PPMinput(Module):
         self.max_width = int((max_width/default_clk_period)/self.prescale)
 
         assert(self.channels > 0)
-        assert(self.prescale > 0)
+        assert(self.prescale > 1)
 
         self.prescaler = Signal(max=self.prescale)
         self.timer = Signal(max=self.blanking_timeout)
@@ -35,7 +35,7 @@ class PPMinput(Module):
         self.channel_counter = Signal(max=self.channels+1)
         self.pwm = [Signal() for _ in range(self.channels)]
 
-        self.sync +=    If(self.prescaler + 1 < self.prescale,
+        self.sync +=    If((self.prescaler + 1) < self.prescale,
                             self.prescaler.eq(self.prescaler + 1)
                         ).Else(
                             self.prescaler.eq(0),
@@ -97,7 +97,6 @@ class PPMoutput(Module):
             min_width=1000e3
         ):
 
-
         self.prescale = int(resolution/default_clk_period)
 
         self.sequence_end = int(((1e9 / frequency) / default_clk_period)/self.prescale)
@@ -107,7 +106,7 @@ class PPMoutput(Module):
         self.channels = channels
 
         assert(self.channels > 0)
-        assert(self.prescale > 0)
+        assert(self.prescale > 1)
         assert(self.min_width > self.pulse_width) # Make sure there's a falling edge between channels
         assert(self.max_width > self.min_width)
         assert(self.sequence_end > (self.channels+1)*self.max_width) # Make sure there's a blanking interval between sequences
@@ -122,7 +121,7 @@ class PPMoutput(Module):
         self.channel_counter = Signal(max=self.channels + 1)
         self.pwm = [Signal() for _ in range(self.channels)]
         self.ppm = Signal()
-        self.enable = Signal()
+        self.active = Signal(reset=True)
 
         for chan in range(self.channels):
             self.comb +=    If(self.channel_counter == chan, 
@@ -132,38 +131,40 @@ class PPMoutput(Module):
                                     self.max_timer.eq(self.min_width)
                                 )
                             )
-            self.comb += self.pwm[chan].eq(self.channel_counter == chan)
+            self.comb += self.pwm[chan].eq((self.channel_counter == chan))
 
-        self.comb += self.ppm.eq(self.channel_timer < self.pulse_width)
+        self.comb += self.ppm.eq((self.channel_timer < self.pulse_width) & self.active)
 
-        self.sync +=    If(self.prescaler + 1 < self.prescale,
+        self.sync +=    If((self.prescaler + 1) < self.prescale,
                             self.prescaler.eq(self.prescaler + 1)
                         ).Else(
                             self.prescaler.eq(0),
                             If(self.sequence_timer + 1 < self.sequence_end,
                                 self.sequence_timer.eq(self.sequence_timer + 1),
-                                If(self.channel_counter < self.channels,    # increment past the final channel for the PWM lines
-                                    If(self.channel_timer + 1 < self.max_timer,
-                                        self.channel_timer.eq(self.channel_timer + 1)
-                                    ).Else(
+                                If(self.channel_timer + 1 < self.max_timer,
+                                    self.channel_timer.eq(self.channel_timer + 1)
+                                ).Else(
+                                    self.channel_timer.eq(0),
+                                    If(self.channel_counter < self.channels,
                                         self.channel_counter.eq(self.channel_counter + 1),
-                                        self.channel_timer.eq(0)
+                                    ).Else(
+                                        self.active.eq(False),
                                     )
                                 )
                             ).Else(
                                 self.sequence_timer.eq(0),
                                 self.channel_timer.eq(0),
-                                self.channel_counter.eq(0)
+                                self.channel_counter.eq(0),
+                                self.active.eq(True)
                             )
                         )
 
 
 # hobby servo PWM
-# counts the widths of a pulse chain, storing the clock counts in widths
-# channels: the maximum number of channels to be decoded and reported
-# timeout: nanoseconds after the last pulse to reset the channel counter, also the maximum width of a servo pulse
+# counts the widths of a servo pulse, storing the prescaled clock counts in width
 # default_clk_period: system clock in nanoseconds
 # resolution: nanoseconds per increment
+# max_width: maximum number of prescaled clock cycles to count (sets bit width)
 
 class PWMinput(Module):
     def __init__(self,
@@ -180,7 +181,7 @@ class PWMinput(Module):
         self.pwm = Signal()
         self.pwm_prev = Signal()
         self.overflow = Signal()
-        self.sync +=    If(self.prescaler + 1 < self.prescale,
+        self.sync +=    If((self.prescaler + 1) < self.prescale,
                             self.prescaler.eq(self.prescaler + 1)
                         ).Else(
                             self.prescaler.eq(0),
