@@ -9,10 +9,18 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 # resolution: nanoseconds per increment
 
 class PPMinput(Module):
-    def __init__(self, channels=8, timeout=5e6, default_clk_period=1e9/16e6, resolution=1e3):
+    def __init__(self,
+            channels=8,
+            timeout=4000e3,
+            default_clk_period=1e9/16e6,
+            resolution=1e3,
+            max_width=2000e3,
+        ):
+
         self.channels = channels
         self.prescale = int(resolution/default_clk_period)
         self.blanking_timeout = int((timeout/default_clk_period)/self.prescale)
+        self.max_width = int((max_width/default_clk_period)/self.prescale)
 
         assert(self.channels > 0)
         assert(self.prescale > 0)
@@ -23,7 +31,7 @@ class PPMinput(Module):
         self.ppm = Signal()
         self.ppm_prev = Signal()
         self.active = Signal()
-        self.widths = [Signal(max=self.blanking_timeout) for _ in range(self.channels)] # measured for output
+        self.widths = [Signal(max=self.max_width) for _ in range(self.channels)] # measured for output
         self.channel_counter = Signal(max=self.channels+1)
         self.pwm = [Signal() for _ in range(self.channels)]
 
@@ -78,7 +86,18 @@ class PPMinput(Module):
 
 
 class PPMoutput(Module):
-    def __init__(self, channels=8, frequency=50, default_clk_period=1e9/16e6, resolution=1e3, pulse_width=300e3, max_width=2000e3, min_width=500e3):
+    def __init__(
+            self,
+            channels=8,
+            frequency=50,
+            default_clk_period=1e9/16e6,
+            resolution=1e3,
+            pulse_width=300e3,
+            max_width=2000e3,
+            min_width=1000e3
+        ):
+
+
         self.prescale = int(resolution/default_clk_period)
 
         self.sequence_end = int(((1e9 / frequency) / default_clk_period)/self.prescale)
@@ -135,5 +154,47 @@ class PPMoutput(Module):
                                 self.sequence_timer.eq(0),
                                 self.channel_timer.eq(0),
                                 self.channel_counter.eq(0)
+                            )
+                        )
+
+
+# hobby servo PWM
+# counts the widths of a pulse chain, storing the clock counts in widths
+# channels: the maximum number of channels to be decoded and reported
+# timeout: nanoseconds after the last pulse to reset the channel counter, also the maximum width of a servo pulse
+# default_clk_period: system clock in nanoseconds
+# resolution: nanoseconds per increment
+
+class PWMinput(Module):
+    def __init__(self,
+            default_clk_period=1e9/16e6,
+            resolution=1e3,
+            max_width=2000e3,
+        ):
+
+        self.prescale = int(resolution/default_clk_period)
+        self.max_width = int((max_width/default_clk_period)/self.prescale)
+        self.timer = Signal(max=self.max_width)
+        self.width = Signal(max=self.max_width)
+        self.prescaler = Signal(max=self.prescale)
+        self.pwm = Signal()
+        self.pwm_prev = Signal()
+        self.overflow = Signal()
+        self.sync +=    If(self.prescaler + 1 < self.prescale,
+                            self.prescaler.eq(self.prescaler + 1)
+                        ).Else(
+                            self.prescaler.eq(0),
+                            self.pwm_prev.eq(self.pwm),
+                            If((self.pwm == 1) & (self.pwm_prev == 0),  # on a pwm rising edge
+                                self.timer.eq(0),
+                                self.overflow.eq(0)
+                            ).Elif((self.pwm == 0) & (self.pwm_prev == 1),   # on a pwm falling edge
+                                self.width.eq(self.timer)                  # capture the interval
+                            ).Elif(self.pwm == 1,
+                                If(self.timer+1 < self.max_width,
+                                    self.timer.eq(self.timer+1)
+                                ).Else(
+                                    self.overflow.eq(1)
+                                )
                             )
                         )
