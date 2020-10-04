@@ -28,7 +28,7 @@ class PPMinputRegister(Module, AutoCSR):
                 max_width=max_width,
             )
         else:
-            self.submodules.ppm_dev = ppm_dev
+            self.ppm_dev = ppm_dev
             channels = self.ppm_dev.channels
 
         # assign an input pin to the PPM device
@@ -82,7 +82,7 @@ class PPMoutputRegister(Module, AutoCSR):
                 min_width=min_width
             )
         else:
-            self.submodules.ppm_dev = ppm_dev
+            self.ppm_dev = ppm_dev
             channels = self.ppm_dev.channels
 
         self.widths = []
@@ -124,7 +124,7 @@ class PWMinputRegister(Module, AutoCSR):
                 max_width=max_width,
             )
         else:
-            self.submodules.pwm_dev = pwm_dev
+            self.pwm_dev = pwm_dev
 
         # assign an input pin to the PPM device
         self.comb += self.pwm_dev.pwm.eq(pwm_pad)

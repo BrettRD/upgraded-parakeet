@@ -10,6 +10,10 @@ def print_state(dut):
   print(f"ppm_prev = {(yield dut.ppm_prev)}")
   print(f"channel_counter = {(yield dut.channel_counter)}")
   print(f"timer = {(yield dut.timer)}")
+  for chan in range(dut.channels):
+    print(f"width_{chan} = {(yield dut.widths[chan])}")
+
+
 
 def skip_us(dut, us):
   print(f"{us} us")

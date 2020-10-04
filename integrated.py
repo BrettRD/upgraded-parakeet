@@ -53,31 +53,31 @@ def main():
 
 
     channels=2
-    ppm_loop_pin = Signal()
+    #ppm_loop_pin = Signal()
     pwm_pins = [Signal() for _ in range(channels)]
-    #ppm_input_extension = [("ppm_input_pin", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
-    #soc.platform.add_extension(ppm_input_extension)
-    #ppm_input_pin = soc.platform.request("ppm_input_pin", 0)
-    soc.submodules.ppm_input = liteppm.PPMinputRegister(ppm_loop_pin, servo_pads=pwm_pins, channels=channels)
+    ppm_input_extension = [("ppm_input_pin", 0, Pins("GPIO:2"), IOStandard("LVCMOS33"))]
+    soc.platform.add_extension(ppm_input_extension)
+    ppm_input_pin = soc.platform.request("ppm_input_pin", 0)
+    soc.submodules.ppm_input = liteppm.PPMinputRegister(ppm_input_pin, servo_pads=pwm_pins, channels=channels)
     soc.add_csr("ppm_input")
 
 
-    #ppm_output_extension = [("ppm_output_pin", 0, Pins("GPIO:3"), IOStandard("LVCMOS33"))]
-    #soc.platform.add_extension(ppm_output_extension)
-    #ppm_output_pin = soc.platform.request("ppm_output_pin", 0)
-    soc.submodules.ppm_output = liteppm.PPMoutputRegister(ppm_loop_pin, channels=channels)
+    ppm_output_extension = [("ppm_output_pin", 0, Pins("GPIO:3"), IOStandard("LVCMOS33"))]
+    soc.platform.add_extension(ppm_output_extension)
+    ppm_output_pin = soc.platform.request("ppm_output_pin", 0)
+    soc.submodules.ppm_output = liteppm.PPMoutputRegister(ppm_output_pin, channels=channels)
     soc.add_csr("ppm_output")
 
 
     #pwm_input_extension = [("pwm_input_pin", 0, Pins("GPIO:4"), IOStandard("LVCMOS33"))]
     #soc.platform.add_extension(pwm_input_extension)
     #pwm_input_pin = soc.platform.request("pwm_input_pin", 0)
-    soc.submodules.pwm_input = liteppm.PWMinputRegister(ppm_loop_pin)
+    soc.submodules.pwm_input = liteppm.PWMinputRegister(ppm_input_pin)
     soc.add_csr("pwm_input")
 
 
     user_led = soc.platform.request("user_led", 0)
-    soc.submodules.blink = Blink(user_led, ppm_loop_pin)
+    soc.submodules.blink = Blink(user_led, ppm_input_pin)
 
 
     soc.submodules.triv_reg = TrivialRegister()

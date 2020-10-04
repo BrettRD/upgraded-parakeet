@@ -113,9 +113,9 @@ class PPMoutput(Module):
 
         self.prescaler = Signal(max=self.prescale)
 
-        self.channel_timer = Signal(max=self.max_width) # times each channel
-        self.max_timer = Signal(max=self.max_width, reset=int((self.max_width+self.min_width)/2))  # select channel
-        self.widths = [Signal(max=self.max_width, reset=int((self.max_width+self.min_width)/2)) for _ in range(self.channels)]
+        self.channel_timer = Signal(max=self.max_width+1) # times each channel
+        self.max_timer = Signal(max=self.max_width+1, reset=int((self.max_width+self.min_width)/2))  # select channel
+        self.widths = [Signal(max=self.max_width+1, reset=int((self.max_width+self.min_width)/2)) for _ in range(self.channels)]
 
         self.sequence_timer = Signal(max=self.sequence_end)
         self.channel_counter = Signal(max=self.channels + 1)
@@ -141,7 +141,7 @@ class PPMoutput(Module):
                             self.prescaler.eq(0),
                             If(self.sequence_timer + 1 < self.sequence_end,
                                 self.sequence_timer.eq(self.sequence_timer + 1),
-                                If(self.channel_timer + 1 < self.max_timer,
+                                If(self.channel_timer < self.max_timer,
                                     self.channel_timer.eq(self.channel_timer + 1)
                                 ).Else(
                                     self.channel_timer.eq(0),

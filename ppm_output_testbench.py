@@ -10,7 +10,10 @@ def print_state(dut):
   print(f"channel_counter = {(yield dut.channel_counter)}")
   print(f"channel_timer = {(yield dut.channel_timer)}")
   print(f"sequence_timer = {(yield dut.sequence_timer)}")
-  
+  for chan in range(dut.channels):
+    print(f"width_{chan} = {(yield dut.widths[chan])}")
+
+
 def skip_us(dut, us):
   print(f"{us} us")
   for _ in range(us*dut.prescale):
