@@ -4,24 +4,72 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 # BLDC ESC (BLDC mode, nothing fancy here)
 
 
-def phase_table(phase_max):
-    table=[]
+def phase_table(phase_max=12):
+
+    a_60 = (phase_max/6)    # 60 degrees of rotation
+    a_30 = (phase_max/12)   # 30 degrees of rotation
+
+    hall={    
+                    0b001 : 0x0 ,
+                    0b011 : 0x1 ,
+                    0b010 : 0x2 ,
+                    0b110 : 0x3 ,
+                    0b100 : 0x4 ,
+                    0b101 : 0x5 ,
+                    0b000 : 0x0 | 0b1000,  # error state
+                    0b111 : 0x0 | 0b1000,  # error state
+        }
+
+    # phase wire assignments for each phase
+    emf_fwd=[   1,     0,     1,     0,     1,     0,       ]   # edge direction for sense coil
+    sense=[     0b100, 0b001, 0b010, 0b100, 0b001, 0b010,   ]   # windings used for sense by phase index
+    drive_f=[   0b001, 0b100, 0b100, 0b010, 0b010, 0b001,   ]   # windings used for forward-high drive by phase index
+    drive_r=[   0b010, 0b010, 0b001, 0b001, 0b100, 0b100,   ]   # windings used for forward-low drive by phase index
+
+    # generate three phase tables with offsets
+    events = []
     for n in range(3):
         phase = {
-            'pos_start'  : int(((4*n+ 0)%12)*(phase_max/12)),
-            'pos_end'    : int(((4*n+ 4)%12)*(phase_max/12)),
-            'fall_start' : int(((4*n+ 4)%12)*(phase_max/12)),
-            'fall_edge'  : int(((4*n+ 5)%12)*(phase_max/12)),
-            'fall_end'   : int(((4*n+ 6)%12)*(phase_max/12)),
-            'neg_start'  : int(((4*n+ 6)%12)*(phase_max/12)),
-            'neg_end'    : int(((4*n+10)%12)*(phase_max/12)),
-            'rise_start' : int(((4*n+10)%12)*(phase_max/12)),
-            'rise_edge'  : int(((4*n+11)%12)*(phase_max/12)),
-            'rise_end'   : int(((4*n+12)%12)*(phase_max/12))
+            'tdc'        : int(a_30 * ((4*n+ 0)%12)),
+            'pos_end'    : int(a_30 * ((4*n+ 2)%12)),
+            'fall_start' : int(a_30 * ((4*n+ 2)%12)),
+            'fall_edge'  : int(a_30 * ((4*n+ 3)%12)),
+            'fall_end'   : int(a_30 * ((4*n+ 4)%12)),
+            'neg_start'  : int(a_30 * ((4*n+ 4)%12)),
+            'bdc'        : int(a_30 * ((4*n+ 6)%12)),
+            'neg_end'    : int(a_30 * ((4*n+ 8)%12)),
+            'rise_start' : int(a_30 * ((4*n+ 8)%12)),
+            'rise_edge'  : int(a_30 * ((4*n+ 9)%12)),
+            'rise_end'   : int(a_30 * ((4*n+10)%12)),
+            'pos_start'  : int(a_30 * ((4*n+10)%12)),
         }
-        table.append(phase)
-    return table
+        events.append(phase)
 
+    # angles by phase angle (0-6)
+    # peaks refer to "top dead centre" and "bottom dead centre" of a coil's cosine wave, which corresponds with a Fet switching moment
+    # zeroes refer to the EMF zero crossings which happen in the middle of a phase
+    peaks  = [ int(a_60 * i)              for i in range(6)]
+    zeroes = [ int(a_30 * ((2*i +1)%12))  for i in range(6)]
+
+    return {
+                'a_30':a_30,
+                'a_60':a_60,
+                'a_360':6*a_60,
+                'hall':hall,
+                'events':events,
+                'peaks':peaks,
+                'zeroes':zeroes,
+                'emf_fwd':emf_fwd,
+                'sense':sense,
+                'drive_f':drive_f,
+                'drive_r':drive_r,
+            }
+
+# Monostable
+# self.out:  pin being monitored
+# self.hot:  flag indicating self.out was recently active 
+# t_off:  default hold time following self.out falling edge
+# t_max:  maximum configurable hold time
 class Monostable(Module):
     def __init__(self, t_off=16, t_max=16):
         assert(t_max>=t_off)
@@ -31,7 +79,7 @@ class Monostable(Module):
         self.t_off = Signal(max=t_max, reset=t_off)
         self.strobe = Signal(reset=1) #allow clock prescalers
 
-        self.comb += hot.eq((self.out) or (self.timer > 0))
+        self.comb += self.hot.eq((self.out) or (self.timer > 0))
         self.sync +=    If(self.out,
                             self.timer.eq(self.t_off)
                         ).Elif(self.hot,
@@ -42,13 +90,22 @@ class Monostable(Module):
 
 
 # half-bridge shoot-through protection
+# this uses the Monostable module to prevent shoot-through
+# l_toff and h_toff are used to enforce a switching dead-time for
+# gate drivers with low switching speeds
+# l_toff: time taken (in sysclock cycles) for the low side driver to turn off
+# h_toff: time taken (in sysclock cycles) for the high side driver to turn off
+# self.en:  turn on one of the transistors
+# self.dir: transistor select (1=high, 0=low)
+# self.l_out: low side transistor gate drive (active high)
+# self.h_out: high side transistor gate drive (active high)
 class HalfBridge(Module):
     def __init__(self, l_toff=16, h_toff=16):
         self.en = Signal(1)
         self.dir = Signal(1)
 
-        self.l_gate = Monostable(h_toff, t_max=h_toff)
-        self.h_gate = Monostable(l_toff, t_max=l_toff)
+        self.submodule.l_gate = Monostable(h_toff, t_max=h_toff)
+        self.submodule.h_gate = Monostable(l_toff, t_max=l_toff)
         self.l_out = self.l_gate.out
         self.h_out = self.h_gate.out
         
@@ -106,12 +163,11 @@ class PWM(Module):
 class UpDownCounter(Module):
     def __init__(self, count_max=2**16, count_min=0):
         self.strobe = Signal(reset=1)
+        self.counter = Signal(max=count_max, min=count_min)
         self.max_count = Signal(max=count_max, min=count_min, reset=count_max)
         self.min_count = Signal(max=count_max, min=count_min, reset=count_min)
         self.increment = Signal(max=count_max-count_min, signed=True)
         self.dir = Signal()
-
-        self.counter = Signal(count_width)
 
         self.sync +=    If(self.strobe,
                             If(self.dir == 0,
@@ -130,128 +186,173 @@ class UpDownCounter(Module):
                         )
 
 
-class PhaseSelector(Module):
-    def __init__(self, phase_max=3*(2**(16-2))):
-        pt = phase_table(phase_max) # XXX find a convention for max vs max+1
-        self.phase = Signal(max=phase_max)
-        # period where phase can be driven to turn clockwise
-        self.uvw_pos  = [Sequencer(count_rise=pt[n]['pos_start'], count_fall=pt[n]['pos_end'], count_max=phase_max) for n in range(3)]
-        # period where the phase back-emf should show a rising zero crossing
-        self.uvw_fall = [Sequencer(count_rise=pt[n]['fall_start'], count_fall=pt[n]['fall_end'], count_max=phase_max) for n in range(3)]
-        # period where phase can be driven to turn counter-clockwise
-        self.uvw_neg  = [Sequencer(count_rise=pt[n]['neg_start'], count_fall=pt[n]['neg_end'], count_max=phase_max) for n in range(3)]
-        # period where the phase back-emf should show a falling zero crossing
-        self.uvw_rise = [Sequencer(count_rise=pt[n]['rise_start'], count_fall=pt[n]['rise_end'], count_max=phase_max) for n in range(3)]
-        # common clock
-        for n in range(3):
-            self.comb += self.uvw_pos[n].counter.eq(self.phase)
-            self.comb += self.uvw_fall[n].counter.eq(self.phase)
-            self.comb += self.uvw_neg[n].counter.eq(self.phase)
-            self.comb += self.uvw_rise[n].counter.eq(self.phase)
-
-
+# A three-phase switching circuit
+# PWM is applied to High side mosfets,
+# Braking is performed by running low-drive PWM on the phase wire that is most positive.
+#  This allows flyback to be absorbed by the high-side body-diode onto the positive supply rail.
+# If enable is high and PWM is low, the most negative phase line will be tied to the negative rail at all times.
+# Toggling brake with enable and PWM fixed high will result in alternating high and low transistors,
+#  this may be useful for efficient generator modes but is not recommended without a phase current control loop
+# enable:  enable line for all transistors
+# direction:  direction to apply torque
+# phase: rotor position from 0-5 (inclusive)
+# pwm:  enable line for high-side transistors
 class Inverter(Module):
-    def __init__(self, selector=PhaseSelector(phase_max=3*(2**(16-2))), phase_max=3*(2**(16-2)), pwm_count_max=2**16):
+    def __init__(self, enable, direction, phase, brake, pwm):
+        pt = phase_table()
+        f_table = Array(pt['drive_f'])  # transistors driven high forward, low reverse
+        r_table = Array(pt['drive_r'])  # transistors driven low forward, high reverse
 
-        self.dir = Signal()
-        self.pwm = PWM(count_max=pwm_count_max)
-        self.uvw_bridge = [HalfBridge(l_toff=16, h_toff=16) for n in range(3)]
-        self.selector = selector
-        self.phase = self.selector.phase
-        self.duty = self.pwm.compare
+        self.inv_dir = Replicate(direction, 3)    # direction the inverter should spin
+        self.inv_en = Replicate(enable, 3)     # global enable
+        self.inv_pwm = Replicate(pwm, 3)    # global PWM line
+        self.br_dir = Signal(3)     
+        self.br_en = Signal(3)
 
-        for n in range(3):
-            self.comb +=    If(self.dir,
-                                self.uvw_bridge[n].en.eq((self.selector.uvw_pos[n].flag and self.pwm.pwm) or self.selector.uvw_neg[n].flag),
-                                self.uvw_bridge[n].dir.eq(self.selector.uvw_pos[n].flag)
+        # instantiate gate drivers and shoot-through protection
+        self.submodule.br_a = HalfBridge(l_toff=16, h_toff=16)
+        self.submodule.br_b = HalfBridge(l_toff=16, h_toff=16)
+        self.submodule.br_c = HalfBridge(l_toff=16, h_toff=16)
+
+        # select drive transistors based on the phase
+        self.comb +=    If(direction == 0,
+                            self.br_en.eq( self.inv_en & ((f_table[phase] & self.inv_pwm) | r_table[phase])),
+                            If(brake == False,
+                                self.br_dir.eq(f_table[phase])
                             ).Else(
-                                self.uvw_bridge[n].en.eq((self.selector.uvw_neg[n].flag and self.pwm.pwm) or self.selector.uvw_pos[n].flag),
-                                self.uvw_bridge[n].dir.eq(self.selector.uvw_neg[n].flag)
+                                self.br_dir.eq(0)
                             )
+                        ).Else(
+                            self.br_en.eq( self.inv_en & ((r_table[phase] & self.inv_pwm) | f_table[phase])),
+                            If(brake == False,
+                                self.br_dir.eq(r_table[phase])
+                            ).Else(
+                                self.br_dir.eq(0)
+                            )
+                        )
+
+        # apply per-phase dir and en to half-bridges
+        self.comb += [
+            Cat(self.br_a.en,  self.br_b.en,  self.br_c.en ).eq(self.br_en),
+            Cat(self.br_a.dir, self.br_b.dir, self.br_c.dir).eq(self.br_dir)
+        ]
+
+
+# observer to look for rising and falling edges on the undriven phase
+#
+# phase:  the approximate rotor position (0-6)
+# pt:  phase table with observables and masks embedded
+# self.comp: comparator inputs
+# self.strobe: rises as the relevant phase makes a zero-crossing
+# self.dir: observed direction of rotation
+# self.phase_observation: the angle of the zero-crossing marked by the strobe
+# self.glitch:  marks observations as invalid if the direction changed
+
 
 class ObserverEMF(Module):
-    def __init__(self, selector=PhaseSelector(phase_max=3*(2**(16-2))), phase_max=3*(2**(16-2))):
-        pt = phase_table(phase_max)
-        self.selector = selector
+    def __init__(self, phase, pt):
+
+        # fetch parts of the phase table
+        s_t = Array(pt['sense'])    # sense mask
+        d_t = Array(pt['emf_fwd'])  # expected edge direction for fwd rotation
+        e_t = Array(pt['zeroes'])    # angles for the given edges
+
         # three comparators, assigned to pins at top level
-        self.comp = [Signal() for _ in range(3)]
-        self.comp_prev = [Signal() for _ in range(3)]
-        self.comp_rise = [Signal() for _ in range(3)]
-        self.comp_fall = [Signal() for _ in range(3)]
-        self.comp_edge = [Signal() for _ in range(3)]
-        self.comp_mask = [Signal() for _ in range(3)]
+        self.comp = Signal(3)
         self.strobe = Signal()
         self.dir = Signal()
-        self.phase_observation = Signal(max=phase_max)
+        self.phase_observation = Signal(max=pt['a_360'])
+        self.glitch = Signal()
 
-        self.comb += self.strobe.eq(self.comp_edge[0] or self.comp_edge[1] or self.comp_edge[2])
+        comp_edge = Signal(3)
+        comp_prev = Signal(3)
+        edge_dir = Signal()
+        dir_prev = Signal()    # stored state for next edge
+        glitch_prev = Signal() # store the validity of the last measurement
 
-        for n in range(3):
-            self.sync += self.comp_prev[n].eq(self.comp[n])
-            self.comb += self.comp_mask[n].eq(self.selector.uvw_rise[n].flag or self.selector.uvw_fall[n].flag)
-            self.comb += self.comp_edge[n].eq( (self.comp[n] != self.comp_prev[n]) and self.comp_mask[n] )
-            self.comb += self.comp_rise[n].eq(self.comp_edge[n] and self.comp[n])
-            self.comb += self.comp_fall[n].eq(self.comp_edge[n] and self.comp[n])
+        # capture the comparator inputs for edge detection
+        self.sync += comp_prev.eq(self.comp)
 
-            self.comb +=    If(self.selector.uvw_rise[n].flag,
-                                self.phase_observation.eq(pt[n]['rise_edge'])
-                            ).Elif(self.selector.uvw_fall[n].flag,
-                                self.phase_observation.eq(pt[n]['fall_edge'])
-                            )
-            self.sync +=    If(self.comp_edge[n],
-                                self.dir.eq(self.comp_rise[n] ^ self.selector.uvw_rise[n].flag)
-                            )
-            # XXX assert that rise and fall can't be driven together
-            # XXX assert that self.selector.uvw_rise[n].flag and self.selector.uvw_fall are never on at the same time
-            # XXX assert that phase_observation is never undriven or doubly driven,
-            #       either would indicate a timing error
+        # turn the three comparators into a strobe and direction
+        self.comb += [
+                self.phase_observation.eq(e_t[phase]),              # present the angle we expect to find the upcoming edge at
+                comp_edge.eq(s_t[phase] & (self.comp ^ comp_prev)), # mask out irrelevant edges according to the phase table (delete PWM noise)
+                self.strobe.eq(comp_edge != 0),                     # set a strobe on every relevant comparator edge
+                edge_dir.eq((comp_edge & self.comp) != 0),          # determine if the edge was rising or falling
+        ]
+
+        # on the comparator's edge, we know the direction of rotation
+        self.comb += If(self.strobe,
+                        self.dir.eq(d_t[phase] ^ edge_dir),
+                        self.glitch.eq(self.dir != dir_prev)   # changes of direction are not usable
+                    ).Else(
+                        self.dir.eq(dir_prev),                 # outside of the strobe present the stored state
+                        self.glitch.eq(glitch_prev)
+                    )
+
+        # store state values for after the strobe
+        self.sync += If(self.strobe,
+                        dir_prev.eq(self.dir),
+                        glitch_prev.eq(self.glitch)
+                    )
+
+
+
+# observer to estimate phase by hall effect inputs
+# pt: phase table
+# self.phase_observation: rotor position observed - 
+#   normally a simple decode of the hall inputs to phase angle.
+#   on strobe, this holds an angle denoting the transition points
+# self.strobe:  pulses high for one clock cycle marking that an observation corresponds to a transition
+# self.dir:  direction of rotation, updates on valid hall edges
+# self.hall:  hall sensor input (3b)
+# self.hall_glitch: marks observations as invalid due to improper decode or transition
+
 
 class ObserverHall(Module):
-    def __init__(self, phase_max=3*(2**(16-2))):
-        pt = phase_table(phase_max)
-        #hall_table={0:8, 1:0,3:1,2:2,6:3,4:4,5:5, 7:8}
-        hall_table = Array([0,0,2,1,4,5,3,0])
-        hall_angle_rough = Array([((2*n+ 1)%12)*((phase_max)/12) for n in range(6)])
-        hall_angle_edge  = Array([((2*n+ 0)%12)*((phase_max)/12) for n in range(6)])
+    def __init__(self, pt):
+        hall_t = Array(pt['hall'])
+        trans_t = Array(pt['peaks'])                # angles for the transitions of the hall signals
+        dwell_t = Array(pt['zeroes'])               # angles for settled hall signals
 
-        self.phase_angle = Signal(max=phase_max) # current observation
-        self.strobe = Signal()        # the observation captures an edge this clock cycle
-        self.hall = Signal(3)          # hall inputs
-        self.dir = Signal()       # direction of last transition
-        self.hall_glitch = Signal()   # observation is invalid
+        self.phase_observation = Signal(max=pt['a_360'])  # observation output
+        self.strobe = Signal()                      # the observation captures a transition this clock cycle
+        self.dir = Signal()                         # direction of last transition
+        self.hall = Signal(3)                       # hall inputs
+        self.hall_glitch = Signal()                 # observation is invalid
 
-        hall_prev = Signal(3)          # last captured hall input
-        hall_error = Signal()         # hall signals are currently invalid
-        hall_error_prev = Signal()    # hall signals were invalid at last clock
-        hall_idx = Signal(3)           # decoded hall position (0..5)
-        hall_idx_prev = Signal(3)      # decoded hall position (0..5) at last clock
-        dir_prev = Signal()       # storage reg for direction
+        hall_prev = Signal(3)           # last captured hall input
+        hall_error = Signal()           # hall signals are currently invalid
+        hall_error_prev = Signal()      # hall signals were invalid at last clock
+        hall_idx = Signal(3)            # decoded hall position (0..5)
+        hall_idx_prev = Signal(3)       # decoded hall position (0..5) at last clock
+        dir_prev = Signal()             # storage reg for direction
 
+        # capture the hall input and decode it.
         self.sync += hall_prev.eq(self.hall)
-        self.comb += self.strobe.eq(self.hall != hall_prev)
-        self.comb += hall_error.eq(self.hall == 0 or self.hall==7)
-        self.comb += hall_error_prev.eq(hall_prev == 0 or hall_prev==7)
-        self.comb += hall_idx.eq(hall_table[self.hall])
-        self.comb += hall_idx_prev.eq(hall_table[hall_prev])
+        self.comb += [  Cat(hall_idx,      hall_error      ).eq(   hall_t[self.hall]  ),
+                        Cat(hall_idx_prev, hall_error_prev ).eq(   hall_t[hall_prev]  ),
+                    ]
 
-        self.comb +=    If(self.strobe == False,
-                            self.phase_angle.eq(hall_angle_rough[hall_idx]),
+        self.comb +=    If((self.hall == hall_prev),
+                            self.phase_observation.eq(dwell_t[hall_idx]),
                             self.dir.eq(dir_prev),
                             self.hall_glitch.eq(hall_error)
-                        ).Elif((hall_idx == (hall_idx_prev+1)) or ((hall_idx==0) and (hall_idx_prev==5)),
-                            self.phase_angle.eq(hall_angle_edge[hall_idx]),
+                        ).Elif(((hall_idx == (hall_idx_prev + 1)) or ((hall_idx==0) and (hall_idx_prev==5))),
+                            self.phase_observation.eq(trans_t[hall_idx]),
                             self.dir.eq(0),
                             self.hall_glitch.eq(hall_error or hall_error_prev),
-                        ).Elif((hall_idx_prev == (hall_idx+1)) or ((hall_idx==5) and (hall_idx_prev==0)),
-                            self.phase_angle.eq(hall_angle_edge[hall_idx_prev]),
+                        ).Elif(((hall_idx == (hall_idx_prev - 1)) or ((hall_idx==5) and (hall_idx_prev==0))),
+                            self.phase_observation.eq(trans_t[hall_idx_prev]),
                             self.dir.eq(1),
                             self.hall_glitch.eq(hall_error or hall_error_prev),
                         ).Else(
-                            self.phase_angle.eq(hall_angle_rough[hall_idx]),
+                            self.phase_observation.eq(dwell_t[hall_idx]),
                             self.dir.eq(dir_prev),
                             self.hall_glitch.eq(True)
                         )
 
+        self.comb += self.strobe.eq((self.hall != hall_prev) and (self.hall_glitch == False))
         self.sync +=    If(self.strobe == True,
                             If((hall_idx == (hall_idx_prev+1)) or ((hall_idx==0) and (hall_idx_prev==5)),
                                 dir_prev.eq(self.dir)
@@ -306,7 +407,6 @@ class PhaseEstimator(Module):
                                 self.phase_timer_strobe.eq(0)
                             )
                         )
-
 
         self.sync +=    If(self.strobe,
                             self.timer.eq(0),
