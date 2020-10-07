@@ -193,7 +193,7 @@ class BaseSoC(SoCCore):
             kwargs["cpu_type"] = None
             kwargs["cpu_variant"] = None
 
-        clk_freq = int(12e6)
+        clk_freq = int(16e6)
 
         if "with_uart" not in kwargs:
             kwargs["with_uart"] = False
