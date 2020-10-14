@@ -21,7 +21,7 @@ def comparator_bits(phase_voltages):
 
 # position 0-6
 def rotor_phase(angle, pt):
-  return int(6 * angle / tau) % 6
+  return int((6 * angle / tau) % 6)
 
 # position 0-pt['a_360']
 def rotor_pos(angle, pt):

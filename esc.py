@@ -352,7 +352,7 @@ class ObserverHall(Module):
                             self.dir.eq(0),
                             self.glitch.eq(hall_error | hall_error_prev),
                         ).Elif(((hall_idx == (hall_idx_prev - 1)) | ((hall_idx==5) & (hall_idx_prev==0))),
-                            self.phase_observation.eq(trans_t[hall_idx_prev]-1),
+                            self.phase_observation.eq(trans_t[hall_idx_prev]), # XXX should be trans_t[hall_idx_prev]-1 but with rollover case
                             self.dir.eq(1),
                             self.glitch.eq(hall_error | hall_error_prev),
                         ).Else(
@@ -480,7 +480,6 @@ class PositionEstimator(Module):
         #self.phase_counter.dir
 
         self.phase_estimate = self.phase_counter.counter
-        self.comb += self.phase_counter.dir.eq(self.dir)
 
         # if an observation becomes valid, sync to it.
         self.sync += [

@@ -45,11 +45,11 @@ class ESCInspector(Module):
 
 
 def test_0(dut):
-  v = 1000 # rotor angular velocity
+  v = -1000 # rotor angular velocity
   a = 0*tau/24 # rotor angle
   
 
-  for ms in range(1000):
+  for ms in range(30):
     print(f"ms={ms}")
     for us in range(1000):
       for clk in range(16):
