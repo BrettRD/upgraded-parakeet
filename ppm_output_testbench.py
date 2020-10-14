@@ -45,7 +45,8 @@ def test_0(dut):
   yield from print_state(dut)
   yield from skip_us(dut, 1500)
   yield from print_state(dut)
-
+  yield from skip_us(dut, 20000)
+  yield from print_state(dut)
 
 
 def testbench(dut):
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     channels=8
     timeout=4000e3
     frequency=50
-    default_clk_period=1e9/16e6
+    clk_period=1e9/16e6
     resolution=1e3
     pulse_width=300e3
     max_width=2000e3
@@ -67,11 +68,11 @@ if __name__ == "__main__":
     ppm_output = ppm.PPMoutput(
                                 channels=channels,
                                 frequency=frequency,
-                                default_clk_period=default_clk_period,
+                                clk_period=clk_period,
                                 resolution=resolution,
                                 pulse_width=pulse_width,
                                 max_width=max_width,
                                 min_width=min_width
                             )
 
-    run_simulation(ppm_output, testbench(ppm_output))
+    run_simulation(ppm_output, testbench(ppm_output), vcd_name="ppm_out.vcd")

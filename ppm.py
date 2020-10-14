@@ -5,22 +5,22 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 # counts the widths of a pulse chain, storing the clock counts in widths
 # channels: the maximum number of channels to be decoded and reported
 # timeout: nanoseconds after the last pulse to reset the channel counter, also the maximum width of a servo pulse
-# default_clk_period: system clock in nanoseconds
+# clk_period: system clock in nanoseconds
 # resolution: nanoseconds per increment
 
 class PPMinput(Module):
     def __init__(self,
             channels=8,
             timeout=4000e3,
-            default_clk_period=1e9/16e6,
+            clk_period=1e9/16e6,
             resolution=1e3,
             max_width=2000e3,
         ):
 
         self.channels = channels
-        self.prescale = int(resolution/default_clk_period)
-        self.blanking_timeout = int((timeout/default_clk_period)/self.prescale)
-        self.max_width = int((max_width/default_clk_period)/self.prescale)
+        self.prescale = int(resolution/clk_period)
+        self.blanking_timeout = int((timeout/clk_period)/self.prescale)
+        self.max_width = int((max_width/clk_period)/self.prescale)
 
         assert(self.channels > 0)
         assert(self.prescale > 1)
@@ -90,19 +90,19 @@ class PPMoutput(Module):
             self,
             channels=8,
             frequency=50,
-            default_clk_period=1e9/16e6,
+            clk_period=1e9/16e6,
             resolution=1e3,
             pulse_width=300e3,
             max_width=2000e3,
             min_width=1000e3
         ):
 
-        self.prescale = int(resolution/default_clk_period)
+        self.prescale = int(resolution/clk_period)
 
-        self.sequence_end = int(((1e9 / frequency) / default_clk_period)/self.prescale)
-        self.pulse_width = int((pulse_width/default_clk_period)/self.prescale)
-        self.max_width = int((max_width/default_clk_period)/self.prescale)
-        self.min_width = int((min_width/default_clk_period)/self.prescale)
+        self.sequence_end = int(((1e9 / frequency) / clk_period)/self.prescale)
+        self.pulse_width = int((pulse_width/clk_period)/self.prescale)
+        self.max_width = int((max_width/clk_period)/self.prescale)
+        self.min_width = int((min_width/clk_period)/self.prescale)
         self.channels = channels
 
         assert(self.channels > 0)
@@ -115,11 +115,11 @@ class PPMoutput(Module):
 
         self.channel_timer = Signal(max=self.max_width+1) # times each channel
         self.max_timer = Signal(max=self.max_width+1, reset=int((self.max_width+self.min_width)/2))  # select channel
-        self.widths = [Signal(max=self.max_width+1, reset=int((self.max_width+self.min_width)/2)) for _ in range(self.channels)]
+        self.widths = [Signal(max=self.max_width+1, reset=int((self.max_width+self.min_width)/2), name=f"width{chan}") for chan in range(self.channels)]
 
         self.sequence_timer = Signal(max=self.sequence_end)
         self.channel_counter = Signal(max=self.channels + 1)
-        self.pwm = [Signal() for _ in range(self.channels)]
+        self.pwm = [Signal(name=f"pwm{chan}") for chan in range(self.channels)]
         self.ppm = Signal()
         self.active = Signal(reset=True)
 
@@ -162,40 +162,45 @@ class PPMoutput(Module):
 
 # hobby servo PWM
 # counts the widths of a servo pulse, storing the prescaled clock counts in width
-# default_clk_period: system clock in nanoseconds
+# clk_period: system clock in nanoseconds
 # resolution: nanoseconds per increment
 # max_width: maximum number of prescaled clock cycles to count (sets bit width)
 
 class PWMinput(Module):
     def __init__(self,
-            default_clk_period=1e9/16e6,
+            clk_period=1e9/16e6,
             resolution=1e3,
             max_width=2000e3,
         ):
 
-        self.prescale = int(resolution/default_clk_period)
-        self.max_width = int((max_width/default_clk_period)/self.prescale)
+        self.prescale = int(resolution/clk_period)
+        self.max_width = int((max_width/clk_period)/self.prescale)
         self.timer = Signal(max=self.max_width)
         self.width = Signal(max=self.max_width)
         self.prescaler = Signal(max=self.prescale)
         self.pwm = Signal()
         self.pwm_prev = Signal()
         self.overflow = Signal()
+        self.strobe = Signal()
         self.sync +=    If((self.prescaler + 1) < self.prescale,
-                            self.prescaler.eq(self.prescaler + 1)
+                            self.prescaler.eq(self.prescaler + 1),
+                            self.strobe.eq(0),
                         ).Else(
                             self.prescaler.eq(0),
                             self.pwm_prev.eq(self.pwm),
                             If((self.pwm == 1) & (self.pwm_prev == 0),  # on a pwm rising edge
                                 self.timer.eq(0),
-                                self.overflow.eq(0)
+                                self.overflow.eq(0),
+                                self.strobe.eq(0),
                             ).Elif((self.pwm == 0) & (self.pwm_prev == 1),   # on a pwm falling edge
-                                self.width.eq(self.timer)                  # capture the interval
+                                self.width.eq(self.timer),                  # capture the interval
+                                self.strobe.eq(1),
                             ).Elif(self.pwm == 1,
                                 If(self.timer+1 < self.max_width,
                                     self.timer.eq(self.timer+1)
                                 ).Else(
-                                    self.overflow.eq(1)
-                                )
+                                    self.overflow.eq(1),
+                                ),
+                                self.strobe.eq(0),
                             )
                         )

@@ -19,3 +19,19 @@ def comparator_bits(phase_voltages):
     val |= (phase_voltages[i] > sum(phase_voltages)/3) << i
   return val
 
+# position 0-6
+def rotor_phase(angle, pt):
+  return int(6 * angle / tau) % 6
+
+# position 0-pt['a_360']
+def rotor_pos(angle, pt):
+  return int(pt['a_360'] * angle / tau) % pt['a_360']
+
+# hall table lookup of phase index
+def hall_bits(angle,pt):
+  phase = rotor_phase(angle, pt)
+  assert(phase>=0)
+  assert(phase<6)
+  # XXX do a reverse lookup on pt[hall]
+  return pt['hall'].index(phase)
+

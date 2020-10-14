@@ -72,7 +72,7 @@ if __name__ == "__main__":
     channels=8
     timeout=4000e3
     frequency=50
-    default_clk_period=1e9/16e6
+    clk_period=1e9/16e6
     resolution=1e3
     pulse_width=300e3
     max_width=2000e3
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     ppm_input = ppm.PPMinput(
                                 channels=channels,
                                 timeout=timeout,
-                                default_clk_period=default_clk_period,
+                                clk_period=clk_period,
                                 resolution=resolution
                             )
 
