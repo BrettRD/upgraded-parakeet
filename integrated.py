@@ -6,7 +6,7 @@
 from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
-from litex.build.generic_platform import Pins, IOStandard
+from litex.build.generic_platform import Pins, IOStandard, Subsignal
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.builder import Builder
 from litex.soc.interconnect.csr import AutoCSR, CSRStatus, CSRStorage
@@ -76,8 +76,65 @@ def main():
     soc.add_csr("pwm_input")
 
 
+
+
+
     user_led = soc.platform.request("user_led", 0)
     soc.submodules.blink = Blink(user_led, ppm_input_pin)
+
+
+
+    inverter_extension = [
+        ("inverter", 0,
+            Subsignal("al", Pins("GPIO:4")),
+            Subsignal("ah", Pins("GPIO:5")),
+            Subsignal("bl", Pins("GPIO:6")),
+            Subsignal("bh", Pins("GPIO:7")),
+            Subsignal("cl", Pins("GPIO:8")),
+            Subsignal("ch", Pins("GPIO:9")),
+            IOStandard("LVCMOS33")
+        )
+    ]
+    comparator_extension = [
+        ("comparators", 0,
+            Subsignal("a", Pins("GPIO:10")),
+            Subsignal("b", Pins("GPIO:11")),
+            Subsignal("c", Pins("GPIO:12")),
+            IOStandard("LVCMOS33")
+        )
+    ]
+    hall_extension = [
+        ("hall", 0,
+            Subsignal("a", Pins("GPIO:13")),
+            Subsignal("b", Pins("GPIO:14")),
+            Subsignal("c", Pins("GPIO:15")),
+            IOStandard("LVCMOS33")
+        )
+    ]
+
+
+    soc.platform.add_extension(inverter_extension)
+    soc.platform.add_extension(comparator_extension)
+    soc.platform.add_extension(hall_extension)
+    inverter_pads = soc.platform.request("inverter")
+    comp_pads = soc.platform.request("comparators")
+    hall_pads = soc.platform.request("hall")
+
+    inverter_pins = [
+                      [inverter_pads.al, inverter_pads.ah],
+                      [inverter_pads.bl, inverter_pads.bh],
+                      [inverter_pads.cl, inverter_pads.ch]
+                    ]
+    comp_pins = Cat(comp_pads.a, comp_pads.b, comp_pads.c)
+    hall_pins = Cat(hall_pads.a, hall_pads.b, hall_pads.c)
+    
+    pt = esc.phase_table(phase_max=12*(2**23))
+    clk_period = 1e9/16e6
+    servo_pin = ppm_input_pin
+
+
+    soc.submodules.esc = esc.ESC(pt, clk_period, inverter_pins, comp_pins, hall_pins, servo_pin)
+
 
 
     soc.submodules.triv_reg = TrivialRegister()

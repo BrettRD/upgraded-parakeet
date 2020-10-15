@@ -11,26 +11,26 @@ def phase_table(phase_max=12):
     a_30 = int(a_360/12)   # 30 degrees of rotation
 
     hall_dict={
-                0b001 : 0x0 ,
-                0b011 : 0x1 ,
-                0b010 : 0x2 ,
-                0b110 : 0x3 ,
-                0b100 : 0x4 ,
-                0b101 : 0x5 ,
-                0b000 : 0x0 | 0b1000,  # error state
-                0b111 : 0x0 | 0b1000,  # error state
+                0b001 : 0x0 | 0b1000,
+                0b011 : 0x1 | 0b1000,
+                0b010 : 0x2 | 0b1000,
+                0b110 : 0x3 | 0b1000,
+                0b100 : 0x4 | 0b1000,
+                0b101 : 0x5 | 0b1000,
+                0b000 : 0x0,  # error state
+                0b111 : 0x0,  # error state
         }
 
     # migen doesn't like generating lookup tables from dicts
     hall = [
-                8, # 0b000 error
-                0, # 0b001
-                2, # 0b010
-                1, # 0b011
-                4, # 0b100
-                5, # 0b101
-                3, # 0b110
-                8, # 0b111 error
+                    0, # 0b0000 error
+                8 | 0, # 0b1001 ok
+                8 | 2, # 0b1010 ok
+                8 | 1, # 0b1011 ok
+                8 | 4, # 0b1100 ok
+                8 | 5, # 0b1101 ok
+                8 | 3, # 0b1110 ok
+                    0, # 0b0111 error
     ]
 
     # phase wire assignments for each phase
@@ -88,8 +88,8 @@ class Monostable(Module):
         assert(t_max>=t_off)
         self.out = Signal()
         self.hot = Signal()
-        self.timer = Signal(max=t_max)
-        self.t_off = Signal(max=t_max, reset=t_off)
+        self.timer = Signal(max=t_max+1)
+        self.t_off = Signal(max=t_max+1, reset=t_off)
         self.strobe = Signal(reset=1) #allow clock prescalers
 
         self.comb += self.hot.eq((self.out) | (self.timer > 0))
@@ -147,8 +147,8 @@ class Sequencer(Module):
 class SimpleCounter(Module):
     def __init__(self, count_max=2**16, count_min=0):
         self.strobe = Signal(reset=1)
-        self.max_count = Signal(max=count_max, min=count_min, reset=count_max)
-        self.counter = Signal(max=count_max, min=count_min, reset=count_min)
+        self.max_count = Signal(max=count_max+1, min=count_min, reset=count_max)
+        self.counter = Signal(max=count_max+1, min=count_min, reset=count_min)
 
         self.sync += If(self.strobe,
                         If(self.counter >= self.max_count,
@@ -255,12 +255,17 @@ class Inverter(Module):
 # pt:  phase table with observables and masks embedded
 # self.comp: comparator inputs
 # self.strobe: rises as the relevant phase makes a zero-crossing
-# self.phase_observation: the angle of the zero-crossing marked by the strobe
+# self.position: the angle of the zero-crossing marked by the strobe
 # self.glitch:  marks observations as invalid if the direction changed
 # self.phase:  the approximate rotor position (0-6)
 # XXX this is probably going to suffer from commutation noise, 
 #     may need to mask the comparators deeper into the cycle
 # XXX find a way to test for muliple zero crossings per phase
+# XXX should report an error if a phase passes without an edge
+
+# XXX can the direction be pulled from the comparator parity with the
+#     phase sector? or is PWM noise too much?
+
 class ObserverEMF(Module):
     def __init__(self, pt, comp_pins):
 
@@ -272,43 +277,58 @@ class ObserverEMF(Module):
         # three comparators, assigned to pins at top level
         self.comp = Signal(3)
         self.strobe = Signal()
-        self.phase_observation = Signal(max=pt['a_360'])
-        self.glitch = Signal()
+        self.position = Signal(max=pt['a_360'])
+        self.ok = Signal()
         self.phase = Signal(3)
 
         comp_edge = Signal(3)
         comp_prev = Signal(3)
         edge_dir = Signal()
-        glitch_prev = Signal() # store the validity of the last measurement
+        ok_prev = Signal() # store the validity of the last measurement
+
+        phase_prev = Signal(3)
+        phase_captured = Signal()   # did we capture an edge in this phase?
+        phase_captured_d = Signal()   # did we capture an edge in this phase?
+        phase_end = Signal()        # edge of a phase transition
+
 
         # capture the comparator inputs for edge detection
-        self.sync += comp_prev.eq(self.comp)
-
+        self.sync += [
+            comp_prev.eq(self.comp),
+            phase_prev.eq(self.phase),
+            ok_prev.eq(self.ok),
+            phase_captured_d.eq(phase_captured),
+        ]
         # turn the three comparators and masks into a strobe for the zero crossing
         self.comb += [
                 self.comp.eq(comp_pins),                    # capture the input pins
-                self.phase_observation.eq(e_t[self.phase]),              # output the angle we expect to find the upcoming edge at
+                self.position.eq(e_t[self.phase]),              # output the angle we expect to find the upcoming edge at
                 comp_edge.eq(s_t[self.phase] & (self.comp ^ comp_prev)), # mask out irrelevant edges according to the phase table (delete PWM noise)
-                self.strobe.eq(comp_edge != 0),                     # set a strobe on every relevant comparator edge
+                phase_end.eq(self.phase != phase_prev),            # reached the end of the last phase
                 edge_dir.eq((comp_edge & self.comp) != 0),          # determine if the edge was rising or falling
 
+                self.strobe.eq(comp_edge != 0),                     # set a strobe on every relevant comparator edge
+
                 If(self.strobe,
-                    self.glitch.eq(d_t[self.phase] ^ edge_dir)      # a glitch is an unexpected zero crossing
+                    self.ok.eq(d_t[self.phase] == edge_dir),         # accept only zero crossings in the correct direction
+                    phase_captured.eq(self.ok),
                 ).Else(
-                    self.glitch.eq(glitch_prev)
+                    If(phase_end,
+                        phase_captured.eq(0),
+                        self.ok.eq(phase_captured_d),
+                    ).Else(
+                        self.ok.eq(ok_prev),
+                        phase_captured.eq(phase_captured_d)
+                    )
                 ),
             ]
 
-        # store state values for after the strobe
-        self.sync += If(self.strobe,
-                        glitch_prev.eq(self.glitch)
-                    )
 
 
 
 # observer to estimate phase by hall effect inputs
 # pt: phase table
-# self.phase_observation: rotor position observed - 
+# self.position: rotor position observed - 
 #   normally a simple decode of the hall inputs to phase angle.
 #   on strobe, this holds an angle denoting the transition points
 # self.strobe:  pulses high for one clock cycle marking that an observation corresponds to a transition
@@ -325,12 +345,12 @@ class ObserverHall(Module):
         self.hall = Signal(3)                       # hall inputs
         self.dir = Signal()                         # direction of last transition
         self.strobe = Signal()                      # the observation captures a transition this clock cycle
-        self.phase_observation = Signal(max=pt['a_360'])  # observation output
-        self.glitch = Signal()                 # observation is invalid
+        self.position = Signal(max=pt['a_360'])     # observation output
+        self.ok = Signal()                # observation is valid
 
         hall_prev = Signal(3)           # last captured hall input
-        hall_error = Signal()           # hall signals are currently invalid
-        hall_error_prev = Signal()      # hall signals were invalid at last clock
+        hall_ok = Signal()              # hall signals are currently valid
+        hall_ok_prev = Signal()         # hall signals were valid at last clock
         hall_idx = Signal(3)            # decoded hall position (0..5)
         hall_idx_prev = Signal(3)       # decoded hall position (0..5) at last clock
         dir_prev = Signal()             # storage reg for direction
@@ -339,29 +359,29 @@ class ObserverHall(Module):
         self.sync += hall_prev.eq(self.hall)
         self.comb += [
                         self.hall.eq(hall_pins),
-                        Cat(hall_idx,      hall_error      ).eq(   hall_t[self.hall]  ),
-                        Cat(hall_idx_prev, hall_error_prev ).eq(   hall_t[hall_prev]  ),
+                        Cat(hall_idx,      hall_ok      ).eq(   hall_t[self.hall]  ),
+                        Cat(hall_idx_prev, hall_ok_prev ).eq(   hall_t[hall_prev]  ),
                     ]
 
         self.comb +=    If((self.hall == hall_prev),
-                            self.phase_observation.eq(dwell_t[hall_idx]),
+                            self.position.eq(dwell_t[hall_idx]),
                             self.dir.eq(dir_prev),
-                            self.glitch.eq(hall_error)
+                            self.ok.eq(hall_ok)
                         ).Elif(((hall_idx == (hall_idx_prev + 1)) | ((hall_idx==0) & (hall_idx_prev==5))),
-                            self.phase_observation.eq(trans_t[hall_idx]),
+                            self.position.eq(trans_t[hall_idx]),
                             self.dir.eq(0),
-                            self.glitch.eq(hall_error | hall_error_prev),
+                            self.ok.eq(hall_ok & hall_ok_prev),
                         ).Elif(((hall_idx == (hall_idx_prev - 1)) | ((hall_idx==5) & (hall_idx_prev==0))),
-                            self.phase_observation.eq(trans_t[hall_idx_prev]), # XXX should be trans_t[hall_idx_prev]-1 but with rollover case
+                            self.position.eq(trans_t[hall_idx_prev]), # XXX should be trans_t[hall_idx_prev]-1 but with rollover case
                             self.dir.eq(1),
-                            self.glitch.eq(hall_error | hall_error_prev),
+                            self.ok.eq(hall_ok & hall_ok_prev),
                         ).Else(
-                            self.phase_observation.eq(dwell_t[hall_idx]),
+                            self.position.eq(dwell_t[hall_idx]),
                             self.dir.eq(dir_prev),
-                            self.glitch.eq(True)
+                            self.ok.eq(True)
                         )
         self.comb +=    self.strobe.eq(self.hall != hall_prev)
-        self.sync +=    If((self.strobe == True)  & (self.glitch == False),
+        self.sync +=    If(self.strobe & self.ok,
                             If((hall_idx == (hall_idx_prev+1)) | ((hall_idx==0) & (hall_idx_prev==5)),
                                 dir_prev.eq(self.dir)
                             ).Elif((hall_idx_prev == (hall_idx+1)) | ((hall_idx==5) & (hall_idx_prev==0)),
@@ -374,14 +394,11 @@ class ObserverHall(Module):
 
 # VelocityEstimator
 # estimate the phase of the rotor based on various information sources
-# XXX can the direction be pulled from the comparator parity with the
-#     phase sector? or is PWM noise too much?
-#
+
 class VelocityEstimator(Module):
     def __init__(self, pt, observer, v_min=1):
-        self.strobe = observer.strobe # output of observer
-        self.glitch = observer.glitch # output of observer
-        self.phase_next_obs = observer.phase_observation # output of observer
+        self.obs = observer
+        self.phase_next_obs = observer.position # output of observer
 
         self.distance = Signal(max=pt['a_360'], reset=pt['a_60'])
 
@@ -391,39 +408,39 @@ class VelocityEstimator(Module):
 
         self.obs_timer = Signal(max=pt['a_360'])        
 
-        self.phase_last_obs = Signal(max=pt['a_360'])     # records the observer output at last valid edge
+        self.last_position = Signal(max=pt['a_360'])     # records the observer output at last valid edge
         self.last_obs_ok = Signal()
 
-        self.velocity_strobe = Signal()
+        self.strobe = Signal()
         self.velocity = Signal(max=pt['a_360'], reset=0)  # velocity estimate
         self.velocity_d = Signal(max=pt['a_360'], reset=0)  # velocity estimate
         self.ready = Signal(reset=1)                    # track the state of divider
-        self.velocity_good = Signal()                       # the currently held velocity is still valid
+        self.ok = Signal()                       # the currently held velocity is still valid
+        self.ok_d = Signal()                       # the currently held velocity is still valid
 
-        
-        
-            # XXX deal with rollover correctly
-        #    If(phase_next_obs >= phase_last_obs,
-        #        self.distance.eq(phase_next_obs - phase_last_obs),
+        # XXX deal with rollover correctly
+        #    If(phase_next_obs >= last_position,
+        #        self.distance.eq(phase_next_obs - last_position),
         #    ).Else(
-        #        self.distance.eq(phase_last_obs - phase_next_obs),
+        #        self.distance.eq(last_position - phase_next_obs),
         #    ),
         self.comb += [
-            self.velocity_strobe.eq((self.div.stop == 1) & (self.ready == 0)),
-            If(self.velocity_strobe,
+            self.strobe.eq((self.div.stop == 1) & (self.ready == 0)),
+            If(self.strobe,
                 self.velocity.eq(self.div.quotient),
             ).Else(
                 self.velocity.eq(self.velocity_d),
-            )
+            ),
+            self.ok.eq((self.strobe | self.ok_d) & self.obs.ok),
         ]
 
         # implement dx/dt = x/t
         self.sync += [
-            If(self.strobe == True,
-                If(self.glitch == False,
+            If(self.obs.strobe == True,
+                self.last_obs_ok.eq(self.obs.ok),
+                If(self.obs.ok == True,
                     # capture the observation
-                    self.phase_last_obs.eq(self.phase_next_obs),
-                    self.last_obs_ok.eq(True),
+                    self.last_position.eq(self.obs.position),
                     self.obs_timer.eq(0),
 
                     # if the last observation was also good, load the numbers into the divider
@@ -437,9 +454,9 @@ class VelocityEstimator(Module):
                         )
                     )
                 ).Else(
-                    # strobe and glitch, this position observation is broken
-                    self.last_obs_ok.eq(False),
-                    self.velocity_good.eq(False),
+                    # strobe and inputs not ok, we can't generate a velocity estimate
+                    # XXX vaguely possible for ok_d to be doubly driven
+                    self.ok_d.eq(False),
                 ),
             ).Else(
                 If(t_max > self.obs_timer + 1,
@@ -450,10 +467,10 @@ class VelocityEstimator(Module):
             ),
 
             # write the divider result to the estimate
-            If(self.velocity_strobe,
+            If(self.strobe,
                 self.ready.eq(1),
                 self.velocity_d.eq(self.div.quotient),
-                self.velocity_good.eq(True),
+                self.ok_d.eq(True),
             ),
         ]
 
@@ -467,10 +484,10 @@ class PositionEstimator(Module):
     def __init__(self, pt, sensor_fusion):
 
         # signals from the selected observer
-        self.phase_observation = sensor_fusion.selected_position
-        self.phase_observation_strobe = sensor_fusion.p_strobe
+        self.position = sensor_fusion.selected_position
+        self.position_strobe = sensor_fusion.p_strobe
         self.velocity = sensor_fusion.selected_velocity
-        self.velocity_observation_strobe = sensor_fusion.v_strobe
+        self.velocity_strobe = sensor_fusion.v_strobe
         self.dir = sensor_fusion.selected_dir
         self.dir_strobe = sensor_fusion.d_strobe
 
@@ -483,13 +500,13 @@ class PositionEstimator(Module):
 
         # if an observation becomes valid, sync to it.
         self.sync += [
-            If(self.phase_observation_strobe,
-                self.phase_counter.counter.eq(self.phase_observation)
+            If(self.position_strobe,
+                self.phase_counter.counter.eq(self.position)
             ).Else(
                 # XXX consider a prescaler
                 self.phase_counter.sync_step()
             ),
-            If(self.velocity_observation_strobe,
+            If(self.velocity_strobe,
                 self.phase_counter.increment.eq(self.velocity),
             ),
             If(self.dir_strobe,
@@ -510,29 +527,11 @@ class ESCSensorFusion(Module):
 
         # one velocity estimator per sensor source
         # one position estimator in total
-
-        self.emf_p_obs = emf_p.phase_observation
-        self.emf_p_strobe = emf_p.strobe
-        self.emf_p_ok = Signal()
-        self.comb += self.emf_p_ok.eq(emf_p.glitch == 0)
-        self.emf_v_obs = emf_v.velocity
-        self.emf_v_strobe = emf_v.velocity_strobe
-        self.emf_v_ok = emf_v.velocity_good
-        self.emf_d = Signal()   # not used,  XXX velocity should be signed
-
-        self.hall_p_obs = hall_p.phase_observation
-        self.hall_p_strobe = hall_p.strobe
-        self.hall_p_ok = Signal()
-        self.comb += self.hall_p_ok.eq(hall_p.glitch == 0)
-        self.hall_v_obs = hall_v.velocity
-        self.hall_v_strobe = hall_v.velocity_strobe
-        self.hall_v_ok = hall_v.velocity_good
-        self.hall_d = hall_p.dir  # valid on p_strobe
-
-        self.open_v_obs = open_v.velocity   # fallback velocity input for ramp generator
-        self.open_d = open_v.dir          
-        self.open_v_strobe = open_v.velocity_strobe
-
+        self.hall_p = hall_p
+        self.hall_v = hall_v
+        self.emf_p = emf_p
+        self.emf_v = emf_v
+        self.open_v = open_v
 
         self.selected_position = Signal(max=pt['a_360'])    #input from position estimator observation
         self.p_strobe = Signal()                        #input from position estimator observation strobe
@@ -552,49 +551,59 @@ class ESCSensorFusion(Module):
 
         self.pos_est = Signal(max=pt['a_360'])  # from phase estimator
 
-
         self.inverter_phase = Signal(max=6)
 
+        self.sync += [
+            If((self.emf_v.velocity > self.emf_v_min) & self.emf_v.ok,
+                self.emf_mode.eq(1),
+                self.hall_mode.eq(0),
+                self.open_mode.eq(0),
+            ).Elif((self.hall_v.velocity > self.hall_v_min) & self.hall_v.ok,
+                self.emf_mode.eq(0),
+                self.hall_mode.eq(1),
+                self.open_mode.eq(0),
+            ).Else(
+                self.emf_mode.eq(0),
+                self.hall_mode.eq(0),
+                self.open_mode.eq(1),
+            )
+        ]
+
+
+
         self.comb += [
-            # if EMF is good, completely ignore the hall effect
-            If((self.emf_v_obs > self.emf_v_min) & self.emf_v_ok,
-                If(self.emf_v_strobe,
-                    self.selected_velocity.eq(self.emf_v_obs),
+            # XXX should not set position until it has set a velocity
+            If(self.emf_mode,
+                If(self.emf_v.strobe & self.emf_v.ok,
+                    self.selected_velocity.eq(self.emf_v.velocity),
                     self.v_strobe.eq(1),
                 ),
-                If(self.emf_p_strobe,
-                    self.selected_position.eq(self.emf_p_obs),
+                If(self.emf_p.strobe & self.emf_p.ok,
+                    self.selected_position.eq(self.emf_p.position),
                     self.p_strobe.eq(1),
                 ),
                 self.inverter_phase.eq(self.pos_est[-3:]),
-                self.emf_mode.eq(1),
-            ).Else(
+            ).Elif(self.hall_mode,
                 # if hall velocity is good, capture the value
-                If((self.hall_v_obs > self.hall_v_min) & self.hall_v_ok,
-                    If(self.hall_v_strobe,
-                        self.selected_velocity.eq(self.hall_v_obs),
-                        self.v_strobe.eq(1),
-                    )
+                If(self.hall_v.strobe & self.hall_v.ok,
+                    self.selected_velocity.eq(self.hall_v.velocity),
+                    self.v_strobe.eq(1),
                 ),
                 # direction is only valid on a hall edge
-                If(self.hall_p_strobe,
-                    self.selected_position.eq(self.hall_p_obs),
+                If(self.hall_p.strobe & self.hall_p.ok,
+                    self.selected_position.eq(self.hall_p.position),
                     self.p_strobe.eq(1),
-                    self.selected_dir.eq(self.hall_d),
+                    self.selected_dir.eq(self.hall_p.dir),
                     self.d_strobe.eq(1),
                 ),
                 # if the hall effect decode is valid, use it directly, otherwise use the last estimate
-                If(self.hall_p_ok,
-                    self.inverter_phase.eq(self.hall_p_obs[-3:]),
-                    self.hall_mode.eq(1),
-                ).Else(
-                    self.inverter_phase.eq(self.pos_est[-3:]),
-                    self.open_mode.eq(1),
-                    If(self.open_v_strobe,          # in open loop mode, allow the throttle to send a velocity ramp
-                        self.selected_velocity.eq(self.open_v_obs),
-                        self.selected_dir.eq(self.open_d),
-                        self.v_strobe.eq(1),
-                    )
+                self.inverter_phase.eq(self.hall_p.position[-3:]),
+            ).Elif(self.open_mode,
+                self.inverter_phase.eq(self.pos_est[-3:]),
+                If(self.open_v.strobe,          # in open loop mode, allow the throttle to send a velocity ramp
+                    self.selected_velocity.eq(self.open_v.velocity),
+                    self.selected_dir.eq(self.open_v.dir),
+                    self.v_strobe.eq(1),
                 )
             )
         ]
@@ -673,16 +682,15 @@ class Throttle(Module):
 # not actually a ramp, XXX develop mutlitple control loops to map command input
 class VelocityRamp(Module):
     def __init__(self, pt, v_default, command_src):
-        self.command_input = command_src.output
-        self.command_dir = command_src.dir
+        self.command_src = command_src
         self.command_stobe = Signal()
         self.velocity = Signal(max=pt['a_360'])
-        self.velocity_strobe = Signal()
+        self.strobe = Signal()
         self.dir = Signal()
         self.comb += [
             self.velocity.eq(v_default),
-            self.velocity_strobe.eq(self.command_stobe),
-            self.dir.eq(self.command_dir),
+            self.strobe.eq(self.command_src.output_strobe),
+            self.dir.eq(self.command_src.dir),
         ]
 
 

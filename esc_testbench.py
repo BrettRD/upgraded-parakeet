@@ -45,17 +45,17 @@ class ESCInspector(Module):
 
 
 def test_0(dut):
-  v = -1000 # rotor angular velocity
-  a = 0*tau/24 # rotor angle
-  
+  v = -1000000*(tau/60) # rotor angular velocity
+  a = 6*tau/24 # rotor angle
 
-  for ms in range(30):
+  for ms in range(3):
     print(f"ms={ms}")
     for us in range(1000):
       for clk in range(16):
         yield from dut.update(a,v)
         yield 
         a += v*(dut.clk_period/1e9)
+
 
 def testbench(dut):
   print("testing emf observer device")

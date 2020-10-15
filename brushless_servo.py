@@ -33,5 +33,5 @@ def hall_bits(angle,pt):
   assert(phase>=0)
   assert(phase<6)
   # XXX do a reverse lookup on pt[hall]
-  return pt['hall'].index(phase)
+  return pt['hall'].index(8|phase)
 

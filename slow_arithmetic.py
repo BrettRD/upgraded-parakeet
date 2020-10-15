@@ -18,24 +18,25 @@ class slow_division(Module):
     quo = Cat(self.quotient, self.stop)
     self.sync += [
       If(self.stop == 0,
-        quo[1:].eq(quo[0:-1]),      # bit shift quotient up, but don't write to bit 0
         div.eq(div >> 1),           # bit shift divisor down
         If(rem >= div,
           rem.eq(rem-div),
-          quo[0].eq(1)
+          quo.eq( Cat(1, quo[0:-1]) ),
         ).Else(
-          quo[0].eq(0)
+          quo.eq( Cat(0, quo[0:-1]) ),
         ),
       )
     ]
 
   def start(self, num, den):
     return [
-      self.remainder.eq(num),
-      self.divisor.eq(den),
-      self.fractional.eq(0),
-      self.quotient.eq(1),
-      self.stop.eq(0),
+      If(self.stop == 1,
+        self.remainder.eq(num),
+        self.divisor.eq(den),
+        self.fractional.eq(0),
+        self.quotient.eq(1),
+        self.stop.eq(0),
+      )
     ]
 
 

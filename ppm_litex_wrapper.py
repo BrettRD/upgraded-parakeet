@@ -12,7 +12,7 @@ class PPMinputRegister(Module, AutoCSR):
             ppm_dev=None,
             channels=8,
             timeout=4000e3,
-            default_clk_period=1e9/16e6,
+            clk_period=1e9/16e6,
             resolution=1e3,
             max_width=2000e3,
             csr_width=8,
@@ -23,7 +23,7 @@ class PPMinputRegister(Module, AutoCSR):
             self.submodules.ppm_dev = ppm.PPMinput(
                 channels=channels,
                 timeout=timeout,
-                default_clk_period=default_clk_period,
+                clk_period=clk_period,
                 resolution=resolution,
                 max_width=max_width,
             )
@@ -63,7 +63,7 @@ class PPMoutputRegister(Module, AutoCSR):
             ppm_dev=None,
             channels=8,
             frequency=50,
-            default_clk_period=1e9/16e6,
+            clk_period=1e9/16e6,
             resolution=1e3,
             pulse_width=300e3,
             max_width=2000e3,
@@ -75,7 +75,7 @@ class PPMoutputRegister(Module, AutoCSR):
             self.submodules.ppm_dev = ppm.PPMoutput(
                 channels=channels,
                 frequency=frequency,
-                default_clk_period=default_clk_period,
+                clk_period=clk_period,
                 resolution=resolution,
                 pulse_width=pulse_width,
                 max_width=max_width,
@@ -111,7 +111,7 @@ class PWMinputRegister(Module, AutoCSR):
             self,
             pwm_pad,
             pwm_dev=None,
-            default_clk_period=1e9/16e6,
+            clk_period=1e9/16e6,
             resolution=1e3,
             max_width=2000e3,
             csr_width=8,
@@ -119,7 +119,7 @@ class PWMinputRegister(Module, AutoCSR):
         ):
         if pwm_dev == None:
             self.submodules.pwm_dev = ppm.PWMinput(
-                default_clk_period=default_clk_period,
+                clk_period=clk_period,
                 resolution=resolution,
                 max_width=max_width,
             )

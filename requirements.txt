@@ -1,3 +1,4 @@
 -e git+https://github.com/m-labs/migen@master#egg=migen
 -e git+https://github.com/enjoy-digital/litex@master#egg=litex
 -e git+https://github.com/im-tomu/valentyusb@master#egg=valentyusb
+-e git+https://github.com/litex-hub/litex-boards@master#egg=litex-boards
